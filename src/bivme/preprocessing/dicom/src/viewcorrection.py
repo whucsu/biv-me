@@ -23,7 +23,7 @@ class VSGUI:
 
     def create_window(self):
         self.window = tk.Tk()
-        self.window.geometry("1280x900")  # Set the window size based on screen size
+        self.window.geometry("1366x768")  # Set the window size based on screen size
         self.window.resizable(width=True, height=True)  # Allow resizing of the window
 
         unique_series = self.view_predictions['Series Number'].unique()
@@ -73,7 +73,7 @@ class VSGUI:
 
     def correct_views_gui(self):
         # Initialise save button at the top
-        btn_optn_confirm = tk.Button(master=self.window, text="Save view predictions", command=self.save_corrections)
+        btn_optn_confirm = tk.Button(master=self.window, text="Save view predictions", command=self.save_corrections, borderwidth=2, relief=tk.RAISED, font=('Arial', 10, 'bold'))
         btn_optn_confirm.grid(row=0, column=4)
 
         # Get directory for png images
@@ -136,16 +136,39 @@ class VSGUI:
 
             # Create a label with the image
             lbl_image = tk.Label(master=self.window, image = image_tk, highlightcolor=color, highlightbackground=color,
-                                  highlightthickness=1, relief=tk.RAISED)
+                                  highlightthickness=2, border=2, relief=tk.RAISED)
             lbl_image.anchor(tk.CENTER)
             lbl_image.grid(row=self.gridlayout[mapped_series][0], column=self.gridlayout[mapped_series][1])
 
-            Hovertip(lbl_image, f'Series {series}, Confidence: {confidences[i]:.2f}, Description: {descriptions[i]}, Location: {locations[i]:.2f}, Frames: {frames[i]}', hover_delay=500)
+            # Add series number text with outline
+            lbl_series = tk.Label(master=self.window, text=f'Series {series}', fg='black', bg='white', border=2, highlightcolor=color, highlightbackground=color)
+            lbl_series.grid(row=self.gridlayout[mapped_series][0], column=self.gridlayout[mapped_series][1], sticky="n")
 
-            # Display drop down with list of different views
-            # Populate with current view
-            self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly"))
-            self.list_of_dropdowns[-1].grid(row=self.gridlayout[mapped_series][0]-1, column=self.gridlayout[mapped_series][1])
+            # Grab view type
+            vp = self.view_predictions[self.view_predictions['Series Number'] == series]
+            vp = vp['Predicted View'].values[0]
+
+            if vp == "Excluded":
+                # Look for info in excluded df
+                excl_row = self.viewSelector.excluded_df[self.viewSelector.excluded_df['Excluded Series'] == series]
+                original_view = excl_row['Original View'].values[0]
+                reason = excl_row['Reason'].values[0]
+                kept = excl_row['Kept Series'].values[0]
+
+                # Add hover text with series number, confidence, description, location, frames, etc
+                Hovertip(lbl_image, f'Series: {series}\nOriginal prediction: {vp} ({original_view})\nReason for exclusion: {reason} as series {kept}\nConfidence: {confidences[i]:.2f}\nDescription: {descriptions[i]}\nLocation: {locations[i]:.2f}\nFrames: {frames[i]}', hover_delay=400)
+
+                # Display drop down with list of different views
+                # Populate with current view
+                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly"))
+                self.list_of_dropdowns[-1].grid(row=self.gridlayout[mapped_series][0]-1, column=self.gridlayout[mapped_series][1])
+
+            else:
+                # Add hover text with series number, confidence, description, location, frames, etc
+                Hovertip(lbl_image, f'Series: {series}\nOriginal prediction: {vp}\nConfidence: {confidences[i]:.2f}\nDescription: {descriptions[i]}\nLocation: {locations[i]:.2f}\nFrames: {frames[i]}', hover_delay=400)
+
+                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly"))
+                self.list_of_dropdowns[-1].grid(row=self.gridlayout[mapped_series][0]-1, column=self.gridlayout[mapped_series][1])
 
         # Configure grids
         for i in range(self.num_rows):

@@ -19,6 +19,7 @@ class ViewSelector:
         self.csv_path = csv_path
         self.my_logger = my_logger
         self.show_warnings = show_warnings
+        self.excluded_df = None
 
     def load_predictions(self):
         self.prepare_data_for_prediction()
