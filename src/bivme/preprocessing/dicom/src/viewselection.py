@@ -209,19 +209,6 @@ class ViewSelector:
                 continue
 
             all_img_positions = series_rows['Image Position Patient'].values
-            all_instance_numbers = series_rows['Instance Number'].values
-
-            try:
-                all_instance_numbers = np.array([float(loc) for loc in all_instance_numbers])
-            except ValueError:
-                if self.show_warnings:
-                    self.my_logger.warning(f"Invalid Instance Number metadata for series {series}. Skipping...")
-                continue
-
-            # Sort by instance number float
-            sorted_indices = np.argsort(all_instance_numbers)
-            all_img_positions = all_img_positions[sorted_indices]
-
             same_position = [np.all(all_img_positions[i] == all_img_positions[0]) for i in range(len(all_img_positions))]
 
             # get basic dicom information
@@ -232,10 +219,36 @@ class ViewSelector:
             series_description = series_rows['Series Description'].values[0]
 
             if not np.all(same_position):
-                # Find out how many series are merged
-                num_merged_series = len(all_img_positions) // len(np.where(same_position)[0])
-                idx_split = [len(all_img_positions) // num_merged_series * i for i in range(num_merged_series)]
-                unique_image_positions = [all_img_positions[i] for i in idx_split]
+                # Sort the merged series in a consistent order based on Slice Location and Instance Number (helps to create more intuitive layout when in GUI)
+                all_slice_locations = series_rows['Slice Location'].values
+                all_instance_numbers = series_rows['Instance Number'].values
+
+                try:
+                    all_slice_locations = np.array([float(loc) for loc in all_slice_locations])
+                except ValueError:
+                    all_slice_locations = None
+
+                try:
+                    all_instance_numbers = np.array([float(loc) for loc in all_instance_numbers])
+                except ValueError:
+                    all_instance_numbers = None
+
+                if all_slice_locations is None or all_instance_numbers is None:
+                    if self.show_warnings:
+                        self.my_logger.warning(f"Could not sort series {series} due to invalid metadata. Skipping...")
+                    continue
+
+                unsorted = [(pos, slice_loc, inst_num) for pos, slice_loc, inst_num in zip(all_img_positions, all_slice_locations, all_instance_numbers)]
+                sorted_unsorted = sorted(unsorted, key=lambda x: (x[1], x[2]))  # Sort by slice location, then instance number
+                all_img_positions = [item[0] for item in sorted_unsorted]
+
+                unique_image_positions = []
+                for pos in all_img_positions:
+                    if pos not in unique_image_positions:
+                        unique_image_positions.append(pos)
+
+                # Find how many unique image positions there are
+                num_merged_series = len(unique_image_positions)
 
                 if self.show_warnings:
                     self.my_logger.info(f"Series {series} contains {num_merged_series} merged series. Splitting...")
