@@ -37,6 +37,10 @@ def extract_cines(src, dst, my_logger):
             except:
                 my_logger.warning(f'Could not find series description tag for {file}. Excluded for now.')
                 continue
+
+            if description == '':
+                my_logger.warning(f'Series description is empty for {file}. Excluded for now.')
+                continue
             
             # Check if the description contains any of the inclusion terms and does not contain any of the exclusion terms
             if any(term in description for term in INCLUSION_TERMS) and not any(term in description for term in EXCLUSION_TERMS):
