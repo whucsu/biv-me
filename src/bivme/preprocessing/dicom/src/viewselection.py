@@ -209,6 +209,19 @@ class ViewSelector:
                 continue
 
             all_img_positions = series_rows['Image Position Patient'].values
+            all_slices_locations = series_rows['Slice Location'].values
+
+            try:
+                all_slices_locations = np.array([float(loc) for loc in all_slices_locations])
+            except ValueError:
+                if self.show_warnings:
+                    self.my_logger.warning(f"Invalid Slice Location metadata for series {series}. Skipping...")
+                continue
+
+            # Sort by slice location float
+            sorted_indices = np.argsort(all_slices_locations)
+            all_img_positions = all_img_positions[sorted_indices]
+            
             same_position = [np.all(all_img_positions[i] == all_img_positions[0]) for i in range(len(all_img_positions))]
 
             # get basic dicom information
