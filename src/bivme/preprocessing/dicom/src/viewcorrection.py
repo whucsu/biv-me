@@ -148,7 +148,7 @@ class VSGUI:
             vp = self.view_predictions[self.view_predictions['Series Number'] == series]
             vp = vp['Predicted View'].values[0]
 
-            if vp == "Excluded":
+            if vp == "Excluded" and self.viewSelector.excluded_df is not None:
                 # Look for info in excluded df
                 excl_row = self.viewSelector.excluded_df[self.viewSelector.excluded_df['Excluded Series'] == series]
                 original_view = excl_row['Original View'].values[0]
