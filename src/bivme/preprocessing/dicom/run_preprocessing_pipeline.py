@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import sys
 import torch
 import time
 import shutil
@@ -119,22 +118,3 @@ def perform_preprocessing(case, config, mylogger):
         # Copy log file to states directory
         shutil.copyfile(f'{output}/log_file_{time_string}.log', os.path.join(states, f'log_file_{time_string}.log'))
 
-def validate_config(config, mylogger):
-    assert os.path.exists(config["input_pp"]["source"]), \
-        f'DICOM folder does not exist! Make sure to add the correct directory under "source" in the config file.'
-    
-    if not (config["view-selection"]["option"] == "default" or config["view-selection"]["option"] == "image-only"  or config["view-selection"]["option"] == "load"):
-        mylogger.error(f'Invalid view selection option: {config["view-selection"]["option"]}. Must be "default", "image-only", or "load".')
-        sys.exit(0)
-
-    if not (config["view-selection"]["correct_mode"] == "automatic" or config["view-selection"]["correct_mode"] == "adaptive" or config["view-selection"]["correct_mode"] == "manual"):
-        mylogger.error(f'Invalid correct mode: {config["view-selection"]["correct_mode"]}. Must be "automatic", "adaptive", or "manual".')
-        sys.exit(0)
-
-    if not (config["contouring"]["smooth_landmarks"] == True or config["contouring"]["smooth_landmarks"] == False):
-        mylogger.error(f'Invalid smooth_landmarks option: {config["contouring"]["smooth_landmarks"]}. Must be true or false.')
-        sys.exit(0)
-
-    if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
-        mylogger.error(f'Invalid overwrite option: {config["output_pp"]["overwrite"]}. Must be true or false.')
-        sys.exit(0)

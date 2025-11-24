@@ -20,11 +20,9 @@ from bivme.fitting.surface_enum import ControlMesh, Surface
 from bivme.meshing.mesh_io import export_mesh
 
 
-def perform_fitting(config: dict, out_dir: str = "./results/", output_format: str = ".vtk", workers: int = 1,
-                    my_logger: logger = logger) -> float:
+def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", workers: int = 1,
+                    output_format: str =".vtk", my_logger: logger = logger) -> float:
     try:
-        folder = config["input_fitting"]["gp_directory"]
-
         # Find slice info file
         filename_info = Path(folder) / f"SliceInfoFile.txt"
         if not filename_info.exists():
@@ -32,7 +30,7 @@ def perform_fitting(config: dict, out_dir: str = "./results/", output_format: st
             return -1
 
         # Extract the patient name from the folder name
-        case_name = os.path.dirname(folder).split(os.sep)[-1]
+        case_name = os.path.basename(os.path.normpath(folder))
 
         # Find all the guide point files in the folder
         rule = re.compile(fnmatch.translate(f"GPFile_*.txt"), re.IGNORECASE)
@@ -41,8 +39,8 @@ def perform_fitting(config: dict, out_dir: str = "./results/", output_format: st
         frame_names = sorted(frame_names)
         frames_to_fit = sorted(np.unique(frame_names))  # if you want to fit all _frames#
 
-        # Create resutls and models output folders
-        output_folder = Path(out_dir)
+        # Create results and models output folders
+        output_folder = Path(out_dir) / case_name
         Path(output_folder).mkdir(parents=True, exist_ok=True)
         output_folder_models = Path(output_folder, "models")
         Path(output_folder_models).mkdir(parents=True, exist_ok=True)
@@ -95,7 +93,6 @@ def perform_fitting(config: dict, out_dir: str = "./results/", output_format: st
         # Handle any accumulated errors (only called at end)
         if errors:
             # Try to throw a summarized error
-            # TODO: Force error to test error handling in SuiteHEART
             msg = "Some frames failed: " + ", ".join(f"{k}: {type(v).__name__}" for k, v in errors.items())
             raise RuntimeError(msg)
         logger.info(f"[CHECKPOINT][FIT] Fitting models took: {time.time() - start_time}s")
@@ -104,7 +101,7 @@ def perform_fitting(config: dict, out_dir: str = "./results/", output_format: st
         start_time = time.time()
 
         my_logger.info(f"Writing out biventricular model data to files...")
-        write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, logger)
+        write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, case_name, logger)
         logger.info(f"[CHECKPOINT][WRITE] Writing out biv models to disk took: {time.time() - start_time}s")
 
         return total_residual / len(frames_to_fit)
@@ -131,7 +128,7 @@ def prepare_all_gp_datasets(config,
         # Create file
         # TODO: Move this to export function
         logger.info(f"Processing frame #{frame_num}")
-        model_file = Path(output_folder_models, f"model_frame_{frame_num:03}.txt")
+        model_file = Path(output_folder_models, f"{case_name}_model_frame_{frame_num:03}.txt")
         model_file.touch(exist_ok=True)
 
         # Check if GP file exists
@@ -183,7 +180,7 @@ def _fit_one_frame(config, data_set, aligned_biv_model):
 
     return biv_model, residual
 
-def write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, logger):
+def write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, case_name, logger):
     # Get config parameters
     is_closed = config["output_fitting"]["closed_mesh"]
     meshes_to_export = config["output_fitting"]["output_meshes"]
@@ -198,7 +195,7 @@ def write_all_biv_models(config, model_dict, output_format, output_folder_models
             np.full(len(biv_model.control_mesh), phase)  # Frame
         ])
         header = "x,y,z,Frame"
-        model_file = Path(output_folder_models, f"model_frame_{phase:03}.txt")
+        model_file = Path(output_folder_models, f"{case_name}_model_frame_{phase:03}.txt")
         np.savetxt(model_file, arr, delimiter=",", header=header, comments="", fmt="%s,%s,%s,%s")
 
         # Save VTK or OBJ files
@@ -219,7 +216,7 @@ def write_all_biv_models(config, model_dict, output_format, output_folder_models
             # Export all requested meshes
             for key, value in meshes.items():
                 vertices, faces_mapped = get_verts_faces(biv_model, value)
-                mesh_filename = f"{key}_{phase:03}{output_format}"
+                mesh_filename = f"{case_name}_{key}_{phase:03}{output_format}"
                 export_mesh(output_format, output_folder, mesh_filename, vertices, faces_mapped, logger)
 
             # Export control mesh (if applicable)
@@ -232,5 +229,5 @@ def write_all_biv_models(config, model_dict, output_format, output_folder_models
 
                 for key, value in control_mesh_meshes.items():
                     vertices, faces_mapped = get_verts_faces_control(biv_model, value)
-                    mesh_filename = f"{key}_{phase:03}_control_mesh{output_format}"
+                    mesh_filename = f"{case_name}_{key}_{phase:03}_control_mesh{output_format}"
                     export_mesh(output_format, output_folder, mesh_filename, vertices, faces_mapped, logger)

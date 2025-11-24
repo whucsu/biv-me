@@ -7,9 +7,56 @@ import datetime
 from loguru import logger
 
 from bivme.preprocessing.dicom.run_preprocessing_pipeline import perform_preprocessing
-from bivme.preprocessing.dicom.run_preprocessing_pipeline import validate_config as validate_config_preprocessing
 from bivme.fitting.perform_fit import perform_fitting
-from bivme.fitting.perform_fit import validate_config as validate_config_fitting
+
+def validate_config_preprocessing(config, mylogger):
+    assert os.path.exists(config["input_pp"]["source"]), \
+        f'DICOM folder does not exist! Make sure to add the correct directory under "source" in the config file.'
+    
+    if not (config["view-selection"]["option"] == "default" or config["view-selection"]["option"] == "image-only"  or config["view-selection"]["option"] == "load"):
+        mylogger.error(f'Invalid view selection option: {config["view-selection"]["option"]}. Must be "default", "image-only", or "load".')
+        sys.exit(0)
+
+    if not (config["view-selection"]["correct_mode"] == "automatic" or config["view-selection"]["correct_mode"] == "adaptive" or config["view-selection"]["correct_mode"] == "manual"):
+        mylogger.error(f'Invalid correct mode: {config["view-selection"]["correct_mode"]}. Must be "automatic", "adaptive", or "manual".')
+        sys.exit(0)
+
+    if not (config["contouring"]["smooth_landmarks"] == True or config["contouring"]["smooth_landmarks"] == False):
+        mylogger.error(f'Invalid smooth_landmarks option: {config["contouring"]["smooth_landmarks"]}. Must be true or false.')
+        sys.exit(0)
+
+    if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
+        mylogger.error(f'Invalid overwrite option: {config["output_pp"]["overwrite"]}. Must be true or false.')
+        sys.exit(0)
+
+def validate_config_fitting(config, mylogger):
+    assert Path(config["input_fitting"]["gp_directory"]).exists(), \
+        f'gp_directory does not exist. Cannot find {config["input_fitting"]["gp_directory"]}!'
+
+    if not (config["breathhold_correction"]["shifting"] == "derived_from_ed" or config["breathhold_correction"]["shifting"] == "average_all_frames" or config["breathhold_correction"]["shifting"] == "none"):
+        mylogger.error(f'argument shifting must be derived_from_ed, average_all_frames or none. {config["breathhold_correction"]["shifting"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
+        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
+        sys.exit(0)
+
+    for mesh in config["output_fitting"]["output_meshes"]:
+        if mesh not in ["LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"]:
+            mylogger.error(f'argument output_meshes invalid. {mesh} given. Allowed values are "LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"')
+            sys.exit(0)
+
+    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
+        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["closed_mesh"] == True or config["output_fitting"]["closed_mesh"] == False):
+        mylogger.error(f'argument closed_mesh must be true or false. {config["output_fitting"]["closed_mesh"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["overwrite"] == True or config["output_fitting"]["overwrite"] == False):
+        mylogger.error(f'argument overwrite must be true or false. {config["output_fitting"]["overwrite"]} given.')
+        sys.exit(0)
 
 def run_preprocessing(case, config, mylogger):
     try:
@@ -33,7 +80,7 @@ def run_fitting(case, config, mylogger):
             
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
         residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=config["input_fitting"]["gp_suffix"], si_suffix=config["input_fitting"]["si_suffix"],
-                        frames_to_fit=[], output_format=config["output_fitting"]["mesh_format"], logger=logger)
+                        workers=1, output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
         
         mylogger.info(f"Average residuals: {residuals} for case {os.path.basename(case)}")
 

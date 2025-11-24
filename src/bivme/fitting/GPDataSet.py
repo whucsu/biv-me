@@ -132,7 +132,7 @@ class GPDataSet(object):
 
             points = np.column_stack([data['x'], data['y'], data['z']])
             contour_types = data['contour_type']  # already str because of encoding='utf-8'
-            slices = data['sliceID'].astype(int)
+            slices = data['sliceID'].astype(int) if 'sliceID' in data.dtype.names else data['frameID'].astype(int)
             weights = data['weight'].astype(float)
 
         except ValueError:
