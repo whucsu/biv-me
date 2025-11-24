@@ -1,11 +1,8 @@
 import os
 import numpy as np
 import copy
-import _pickle as pickle
 from copy import deepcopy
 from .geometric_tools import normalize_v3
-from scipy.spatial import cKDTree
-
 
 class Mesh:
     """
@@ -265,16 +262,16 @@ class Mesh:
     def get_nodes(self):
         return self.nodes
 
-    def export_pickle(self,file_name):
-        mpickle = dict()
-        mpickle['verts'] = self.nodes.tolist()
-        mpickle['elems'] = self.elements.tolist()
-        mpickle['mats'] = self.get_materials().tolist()
-        pickle_string = pickle.dumps(mpickle)
-
-        fid_pickle = open(file_name + '.pickle', 'wb')
-        fid_pickle.write(pickle_string)
-        fid_pickle.close()
+    # def export_pickle(self,file_name):
+    #     mpickle = dict()
+    #     mpickle['verts'] = self.nodes.tolist()
+    #     mpickle['elems'] = self.elements.tolist()
+    #     mpickle['mats'] = self.get_materials().tolist()
+    #     pickle_string = pickle.dumps(mpickle)
+    #
+    #     fid_pickle = open(file_name + '.pickle', 'wb')
+    #     fid_pickle.write(pickle_string)
+    #     fid_pickle.close()
 
 
 
@@ -660,31 +657,6 @@ class Mesh:
 
         return out_meshes
 
-    def crop_by_landmarks(self,landmarks, reidex_verts = False):
-        '''
-        Crop a closed mesh be using the distance to the given landmarks to compute the
-        components
-        :param landmarks: (nx3) n landmarks
-        :return: list of n meshes
-        '''
-
-        verts = deepcopy(self.nodes)
-        facets = deepcopy(self.elements)
-        landmarks_tree = cKDTree(landmarks)
-        distance, closest_ld_index = landmarks_tree.query(verts)
-        components = np.unique(closest_ld_index)
-
-
-        com_facets = []
-        for c in components:
-            selected_verts_ids, = np.where(closest_ld_index == c)
-            binary_facets = np.isin(facets, selected_verts_ids)
-            selected_facets = binary_facets.sum(axis=1)
-            com_facets.append( facets[selected_facets >1])
-
-
-        return self.break_mesh(com_facets, reidex_verts = False)
-
     def break_mesh(self, components, reidex_verts = True):
         '''
 
@@ -910,8 +882,3 @@ class Mesh:
         # #change points to the original position
         Fidx = pts + [list(P0)]*len(pts)
         return Fidx
-
-
-
-
-
