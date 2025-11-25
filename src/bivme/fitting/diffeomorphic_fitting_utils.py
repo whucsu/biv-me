@@ -142,8 +142,6 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
 
     final_time = time.time() - start_time
     my_logger.success(f"End of convex optimization. Time taken: {final_time}")
-    my_logger.success(f"PARAMS FOR TESTING: {iteration} {err} {final_time}")
-
 
 def generate_contraint_matrix(mesh):
     """

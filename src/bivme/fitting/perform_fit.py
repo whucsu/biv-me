@@ -42,15 +42,13 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         # Create results and models output folders
         output_folder = Path(out_dir) / case_name
         Path(output_folder).mkdir(parents=True, exist_ok=True)
-        output_folder_models = Path(output_folder, "models")
-        Path(output_folder_models).mkdir(parents=True, exist_ok=True)
 
         # Measure shift using key reference frame (e.g., ed_frame)
         start_time = time.time()
         my_logger.info(f"Creating reference dataset...")
         ed_dataset, shift_to_apply, updated_slice_position = create_ref_dataset(config,
                                                                                 folder,
-                                                                                output_folder_models,
+                                                                                output_folder,
                                                                                 filename_info,
                                                                                 case_name,
                                                                                 frame_names,
@@ -63,7 +61,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         # Prepare all guide point datasets upfront (to avoid read/write parallelization slowdowns)
         start_time = time.time()
         my_logger.info(f"Creating all guide point datasets upfront...")
-        gp_dataset_list = prepare_all_gp_datasets(config, frames_to_fit, output_folder_models, folder, filename_info,
+        gp_dataset_list = prepare_all_gp_datasets(config, frames_to_fit, output_folder, folder, filename_info,
                                                   case_name, shift_to_apply, updated_slice_position, logger)
         logger.info(f"[CHECKPOINT][PREP] Preparing guide point models took: {time.time() - start_time}s")
 
@@ -101,7 +99,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         start_time = time.time()
 
         my_logger.info(f"Writing out biventricular model data to files...")
-        write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, case_name, logger)
+        write_all_biv_models(config, model_dict, output_format, output_folder, case_name, logger)
         logger.info(f"[CHECKPOINT][WRITE] Writing out biv models to disk took: {time.time() - start_time}s")
 
         return total_residual / len(frames_to_fit)
@@ -111,7 +109,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
 
 def prepare_all_gp_datasets(config,
                         frames_to_fit,
-                        output_folder_models,
+                        output_folder,
                         folder,
                         filename_info,
                         case_name,
@@ -128,7 +126,7 @@ def prepare_all_gp_datasets(config,
         # Create file
         # TODO: Move this to export function
         logger.info(f"Processing frame #{frame_num}")
-        model_file = Path(output_folder_models, f"{case_name}_model_frame_{frame_num:03}.txt")
+        model_file = Path(output_folder, f"{case_name}_model_frame_{frame_num:03}.txt")
         model_file.touch(exist_ok=True)
 
         # Check if GP file exists
@@ -180,7 +178,7 @@ def _fit_one_frame(config, data_set, aligned_biv_model):
 
     return biv_model, residual
 
-def write_all_biv_models(config, model_dict, output_format, output_folder_models, output_folder, case_name, logger):
+def write_all_biv_models(config, model_dict, output_format, output_folder, case_name, logger):
     # Get config parameters
     is_closed = config["output_fitting"]["closed_mesh"]
     meshes_to_export = config["output_fitting"]["output_meshes"]
@@ -195,7 +193,7 @@ def write_all_biv_models(config, model_dict, output_format, output_folder_models
             np.full(len(biv_model.control_mesh), phase)  # Frame
         ])
         header = "x,y,z,Frame"
-        model_file = Path(output_folder_models, f"{case_name}_model_frame_{phase:03}.txt")
+        model_file = Path(output_folder, f"{case_name}_model_frame_{phase:03}.txt")
         np.savetxt(model_file, arr, delimiter=",", header=header, comments="", fmt="%s,%s,%s,%s")
 
         # Save VTK or OBJ files

@@ -51,7 +51,7 @@ def create_ref_dataset(config, folder, output_folder_models, filename_info, case
         if not filename.exists():
             logger.error(f"Cannot find {filename} file! Skipping this model")
             return None
-
+        
         ed_dataset = GPDataSet(str(filename), str(filename_info), case_name, sampling=gp_ds_factor, frame_num=ed_frame)
         if not ed_dataset.success:
             return None
