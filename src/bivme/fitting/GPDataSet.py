@@ -223,10 +223,15 @@ class GPDataSet(object):
         if np.sum(apex_index) > 0:
             self.apex = P[apex_index, :]
 
-            if len(self.apex) > 0:
+            if len(self.apex) > 1:
+                self.apex = self.apex.mean(axis=0) # if more than one point, take the centroid
+            else:
                 self.apex = self.apex[0, :]
+        else:
+            logger.error(f"No apex points for this frame!")
+            return False
+        
         return True
-
     @staticmethod
     def convert_contour_types(contours):
         "add by A.Mira on 01/2020"
@@ -357,14 +362,14 @@ class GPDataSet(object):
 
         slices_to_use = [int(line[index_image_id]) - 1 for line in lines]
         all_positions = []
-        for i in slices_to_use:
-            slice_id = int(lines[i][index_image_id])
-            position = np.array(lines[i][index_im_position: index_im_position + 3]).astype(float)
+        for idx, id in enumerate(slices_to_use):
+            slice_id = int(lines[idx][index_image_id])
+            position = np.array(lines[idx][index_im_position: index_im_position + 3]).astype(float)
             all_positions.append(position)
-            orientation = np.array(lines[i][index_im_orientation: index_im_orientation + 6]).astype(float)
+            orientation = np.array(lines[idx][index_im_orientation: index_im_orientation + 6]).astype(float)
 
             spacing = np.array(
-                lines[i][index_pixel_spacing: index_pixel_spacing + 2]
+                lines[idx][index_pixel_spacing: index_pixel_spacing + 2]
             ).astype(float)
 
             new_slice = Slice(
