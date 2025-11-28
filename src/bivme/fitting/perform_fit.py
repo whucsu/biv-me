@@ -39,6 +39,10 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         frame_names = sorted(frame_names)
         frames_to_fit = sorted(np.unique(frame_names))  # if you want to fit all _frames#
 
+        if len(frame_names) == 0:
+            my_logger.error(f"Cannot find any GPFiles in {folder}! Skipping this case")
+            return -1
+
         # Create results and models output folders
         output_folder = Path(out_dir) / case_name
         Path(output_folder).mkdir(parents=True, exist_ok=True)
@@ -46,13 +50,18 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         # Measure shift using key reference frame (e.g., ed_frame)
         start_time = time.time()
         my_logger.info(f"Creating reference dataset...")
-        ed_dataset, shift_to_apply, updated_slice_position = create_ref_dataset(config,
-                                                                                folder,
-                                                                                output_folder,
-                                                                                filename_info,
-                                                                                case_name,
-                                                                                frame_names,
-                                                                                logger)
+        try:
+            ed_dataset, shift_to_apply, updated_slice_position = create_ref_dataset(config,
+                                                                                    folder,
+                                                                                    output_folder,
+                                                                                    filename_info,
+                                                                                    case_name,
+                                                                                    frame_names,
+                                                                                    logger)
+        except TypeError:
+            my_logger.error(f"Cannot initialize reference dataset! Skipping this case")
+            return -1
+        
         # Create reference biv model and update its pose/scale
         aligned_biv_model = BiventricularModel(MODEL_RESOURCE_DIR, folder)
         aligned_biv_model.update_pose_and_scale(ed_dataset)
@@ -78,10 +87,15 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
                 ex.submit(_fit_one_frame, config, data_set, aligned_biv_model): data_set
                 for data_set in gp_dataset_list
             }
-            for fut in as_completed(futs):
+            for idx,fut in enumerate(as_completed(futs)):
                 data_set = futs[fut]
+                if data_set is None:
+                    num = f"{idx:.3f}" # get frame number from index
+                    errors[num] = RuntimeError("Failed to prepare dataset")
+                    continue
                 num = data_set.get_frame_num()
                 try:
+                    
                     biv_model, residual = fut.result()
                     model_dict[num] = biv_model
                     total_residual += residual  # will raise if the worker threw
@@ -92,7 +106,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         if errors:
             # Try to throw a summarized error
             msg = "Some frames failed: " + ", ".join(f"{k}: {type(v).__name__}" for k, v in errors.items())
-            raise RuntimeError(msg)
+            logger.error(msg)
         logger.info(f"[CHECKPOINT][FIT] Fitting models took: {time.time() - start_time}s")
 
         # Finalize

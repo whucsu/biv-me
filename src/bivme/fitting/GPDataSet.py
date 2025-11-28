@@ -200,14 +200,14 @@ class GPDataSet(object):
         if np.sum(mitral_index) > 0:
             self.mitral_centroid = P[mitral_index, :].mean(axis=0)
         else:
-            logger.error(f"No mitral valve points for this frame! Skipping it")
+            logger.error(f"No mitral valve points for this frame!")
             return False
 
         tricuspid_index = self.contour_type == ContourType.TRICUSPID_VALVE
         if np.sum(tricuspid_index) > 0:
             self.tricuspid_centroid = P[tricuspid_index, :].mean(axis=0)
         else:
-            logger.error(f"No tricuspid valve points for this frame! Skipping it")
+            logger.error(f"No tricuspid valve points for this frame!")
             return False
 
         aorta_contour_index = self.contour_type == ContourType.AORTA_VALVE

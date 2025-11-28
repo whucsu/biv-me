@@ -112,10 +112,7 @@ class ExplicitFitterNumpy:
                 break
 
             last_res = res
-            self.logger.info(f" Iteration {k}: "
-                             f", weighted-RMSE={last_res:.6f}"
-                             f", alpha={a}"
-                             f", projected={step_log['projected'].tolist()}")
+            self.logger.info(f"     Iteration {k}       ECF error {last_res:.6f}")
 
         # Return results
         final_stats = {"weighted_rmse": float(last_res), "iters": k}

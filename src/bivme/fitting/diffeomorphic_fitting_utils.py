@@ -109,7 +109,7 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
             break
 
         displacement, err = fit_least_squares_model(biv_model, weight_gp, data_set, trans_weight, lambda_high)
-        my_logger.info(f"     Iteration {iteration} Weight {lambda_high}    ICF error {err}")
+        my_logger.info(f"     Iteration {iteration}     Weight {lambda_high}    ICF error {err}")
 
         mesh_try = biv_model.control_mesh + displacement
         if biv_model.is_diffeomorphic(mesh_try, min_jacobian):
