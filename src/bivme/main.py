@@ -58,6 +58,10 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument overwrite must be true or false. {config["output_fitting"]["overwrite"]} given.')
         sys.exit(0)
 
+    if not config["multiprocessing"]["workers"] > 0:
+        mylogger.error(f'argument workers must be a positive integer. {config["multiprocessing"]["workers"]} given.')
+        sys.exit(0)
+
 def run_preprocessing(case, config, mylogger):
     try:
         perform_preprocessing(case, config, mylogger)
@@ -80,7 +84,7 @@ def run_fitting(case, config, mylogger):
             
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
         residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=config["input_fitting"]["gp_suffix"], si_suffix=config["input_fitting"]["si_suffix"],
-                        workers=1, output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
+                        workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
         
         mylogger.info(f"Average residuals: {residuals} for case {os.path.basename(case)}")
 
