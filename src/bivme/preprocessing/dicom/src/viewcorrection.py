@@ -201,14 +201,14 @@ class VSGUI:
             if confidence < 0.66:
                 color = 'orange'
             else:
-                color = 'green'
+                color = 'limegreen'
 
             # Grab view type
             vp = self.view_predictions[self.view_predictions['Series Number'] == series]
             vp = vp['Predicted View'].values[0]
 
             if vp == "Excluded": # Highlight excluded series in red
-                color = 'red'
+                color = 'crimson'
 
             # Create a label with the image
             lbl_image = tk.Label(master=self.window, image = image_tk, highlightcolor=color, highlightbackground=color,
