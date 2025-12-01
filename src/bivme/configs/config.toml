@@ -95,12 +95,12 @@ option = "default"
 # * "load" : View predictions are loaded from the states folder, if they exist
 # Default: "default"
 
-correct_mode = "adaptive"
+correct_mode = "manual"
 # Define whether you would like to manually review and correct view predictions. "adaptive" is generally recommended to avoid downstream errors.
 # * "manual": will launch a GUI after completing view predictions to allow you to correct any mispredictions
 # * "adaptive": will only launch a GUI if there are any poor predictions or missing views
 # * "automatic": will not launch the GUI and will use the predictions as they are with no interruption
-# Default: "adaptive"
+# Default: "manual"
 
 [contouring]
 smooth_landmarks = true
