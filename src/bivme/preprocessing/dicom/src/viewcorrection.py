@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import StringVar, ttk
 import os
 from pathlib import Path
-from csv import writer
 from PIL import Image, ImageTk
 import pandas as pd
 from idlelib.tooltip import Hovertip
@@ -18,8 +17,8 @@ class VSGUI:
         self.img_dict = {}
         self.viewSelector = viewSelector
         self.my_logger = my_logger
-        self.create_window()
         self.sequence_running = None
+        self.create_window()
 
     def create_window(self):
         self.window = tk.Tk()
@@ -59,7 +58,7 @@ class VSGUI:
 
     # This function saves the corrected predictions to the processing and states directories
     def save_corrections(self):
-        self.my_logger.info("----- Saving view predictions...")
+        self.my_logger.info("----- Saving view selections...")
         # Get selected option from the drop down menu
         for i, dropdown in enumerate(self.list_of_dropdowns):
             selected_view = dropdown.get()
@@ -72,9 +71,9 @@ class VSGUI:
         self.view_predictions.to_csv(self.viewSelector.csv_path, index=False)
 
         # Add text confirmation to the header
-        lbl_confirmation = tk.Label(master=self.window, text="View predictions saved successfully!", fg="green")
-        lbl_confirmation.grid(row=0, column=5, sticky=tk.W + tk.E)
-        self.my_logger.success("----- View predictions saved successfully. Close the window to continue.")
+        lbl_confirmation = tk.Label(master=self.window, text="View selections saved successfully!", fg="green", font=('Arial', 12))
+        lbl_confirmation.grid(row=0, column=5, sticky=tk.W + tk.E, columnspan=2)
+        self.my_logger.success("----- View selections saved successfully. Close the window to continue.")
 
     def display_full_sequence(self, event, idx):
         global loop
@@ -117,8 +116,12 @@ class VSGUI:
 
     def correct_views_gui(self):
         # Initialise save button at the top
-        btn_optn_confirm = tk.Button(master=self.window, text="Save view predictions", command=self.save_corrections, borderwidth=2, relief=tk.RAISED, font=('Arial', 10, 'bold'))
-        btn_optn_confirm.grid(row=0, column=4)
+        btn_optn_confirm = tk.Button(master=self.window, text="Press to save view selections", command=self.save_corrections, borderwidth=5, highlightthickness=5, relief=tk.RAISED, font=('Arial', 18, 'bold'))
+        btn_optn_confirm.grid(row=0, column=3, columnspan=2, sticky=tk.W + tk.E)
+
+        # Display the case information at the top
+        case_info = tk.Label(master=self.window, text=f"Case: {self.patient}", fg="black", font=('Arial', 16))
+        case_info.grid(row=0, column=0, columnspan=2, sticky=tk.W + tk.E)
 
         # Get directory for png images
         unsorted_img_directory = Path(self.dst, 'view-classification', 'unsorted')
@@ -224,7 +227,7 @@ class VSGUI:
             self.display_full_sequence(None, i)
 
             # Add series number text with outline
-            lbl_series = tk.Label(master=self.window, text=f'Series {series}', fg='black', bg='white', border=2, highlightcolor=color, highlightbackground=color)
+            lbl_series = tk.Label(master=self.window, text=f'Series {series}', fg='black', bg='white', border=2, highlightcolor=color, highlightbackground=color, font=('Arial', 10))
             lbl_series.grid(row=self.gridlayout[mapped_series][0], column=self.gridlayout[mapped_series][1], sticky="n")
 
             if vp == "Excluded" and self.viewSelector.excluded_df is not None:
@@ -239,14 +242,14 @@ class VSGUI:
 
                 # Display drop down with list of different views
                 # Populate with current view
-                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly"))
+                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly", font=('Arial', 12)))
                 self.list_of_dropdowns[-1].grid(row=self.gridlayout[mapped_series][0]-1, column=self.gridlayout[mapped_series][1])
 
             else:
                 # Add hover text with series number, confidence, description, location, frames, etc
-                Hovertip(lbl_image, f'Series: {series}\nOriginal prediction: {vp}\nConfidence: {confidences[i]:.2f}\nDescription: {descriptions[i]}\nLocation: {locations[i]:.2f}\nFrames: {frames[i]}', hover_delay=400)
+                Hovertip(lbl_image, f'Series: {series}\nOriginal prediction: {vp}\nConfidence: {confidences[i]:.2f}\nDescription: {descriptions[i]}\nLocation: {locations[i]:.2f}\nFrames: {frames[i]}', hover_delay=300)
 
-                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly"))
+                self.list_of_dropdowns.append(ttk.Combobox(self.window, values=LIST_OF_VIEWS, textvariable=stringvars[i], state="readonly", font=('Arial', 12)))
                 self.list_of_dropdowns[-1].grid(row=self.gridlayout[mapped_series][0]-1, column=self.gridlayout[mapped_series][1])
 
         # Configure grids
