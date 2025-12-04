@@ -24,7 +24,11 @@ class VSGUI:
         self.window = tk.Tk()
 
         # Get screen size
-        screen_width = self.window.winfo_screenwidth() - 100  # Leave some margin
+        if self.window.winfo_screenwidth() > 1920:
+            screen_width = 1920 - 100  # Doesn't need to be larger than 1920
+        else:
+            screen_width = self.window.winfo_screenwidth() - 100  # Leave some margin
+
         self.scaling = screen_width / 1366  # Scale based on 1366x768 width 
         width = int(1366 * self.scaling) # Set window width to 1366 scaled
         height = int(768 * self.scaling) # Set window height to 768 scaled
