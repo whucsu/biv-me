@@ -6,8 +6,8 @@ INCLUSION_TERMS = [''] # include only series that have any one of these terms in
 EXCLUSION_TERMS = ['loc', 'molli', 't1', 't2', 'dense', 'scout', 'grid', 'flow', 'fl2d',
                    'single shot', 'report', 'document', 'segmentation', 'result', 'mapping', 'mag', 'psir', 'suiteheart',
                    'axial', 'coronal', 'transverse', 'cas', 'survey', 'nav', 'tpat', 't-pat', 'gad',
-                   'cs_rt_10sl_jc', 'truefisp', 'catch', 'fl3d', 'exceptions', 'haste', 'oblique', 'ax fiesta', 'perf',
-                   'pc', 'phase', 'contrast', 'ao', 'ps:', 'pa cine ir', 'dynamic_test', 'bolus', 'gre'] # exclude series with any one of these terms in the description
+                   'cs_rt_10sl_jc', 'truefisp', 'catch', 'fl3d', 'exceptions', 'haste', 'oblique', 'perf',
+                   'pc', 'phase', 'contrast', 'ao', 'ps:', 'pa cine ir', 'dynamic_test', 'bolus', 'gre', 'rr'] # exclude series with any one of these terms in the description
 
 def extract_cines(src, dst, my_logger):
     # This function is used to preprocess the DICOM files before running the pipeline. 
@@ -18,6 +18,7 @@ def extract_cines(src, dst, my_logger):
     os.makedirs(processed_dcm_dir, exist_ok=True) # cine .dcms will be saved here
 
     file_paths = []
+    excluded_descriptions = {}
     total_images = 0
     # Get all files in the source directory
     for root, dirs, files in os.walk(src):
@@ -37,13 +38,35 @@ def extract_cines(src, dst, my_logger):
             except:
                 my_logger.warning(f'Could not find series description tag for {file}. Excluded for now.')
                 continue
+
+            # if description == '':
+            #     my_logger.warning(f'Series description is empty for {file}. Excluded for now.')
+            #     continue
             
             # Check if the description contains any of the inclusion terms and does not contain any of the exclusion terms
             if any(term in description for term in INCLUSION_TERMS) and not any(term in description for term in EXCLUSION_TERMS):
                 file_paths.append(os.path.join(root, file))
+            else:
+                # Find offending term(s)
+                offences = []
+                for term in EXCLUSION_TERMS:
+                    if term in description:
+                        offences.append(term)
+                        
+                excluded_descriptions[description] = offences
     
     my_logger.info(f'Found {total_images} images in the source directory')
     my_logger.info(f'Extracted {len(file_paths)} which matched the inclusion criteria.')
+
+    if len(excluded_descriptions) > 0:
+        my_logger.warning(f'Excluded series descriptions:')
+        for desc, offences in excluded_descriptions.items():
+            if len(offences) > 0:
+                my_logger.warning(f' - {desc} (excluded due to term(s): {", ".join(offences)})')
+            else:
+                my_logger.warning(f' - {desc} (no inclusion terms matched)')
+
+        my_logger.info(f'If you think some images are being wrongly excluded, please update the INCLUSION_TERMS and EXCLUSION_TERMS in src/bivme/preprocessing/dicom/extract_cines.py')
 
     file_names = [os.path.basename(file) for file in file_paths]
     sets = list(set(file_names))  # Get unique file names to avoid processing duplicates

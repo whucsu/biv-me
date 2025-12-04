@@ -11,6 +11,8 @@ CONFIDENCE_THRESHOLD = 0.66  # Modify this to change the confidence threshold fo
                             # Otherwise, the metadata-based prediction will be used.
 
 def handle_duplicates(view_predictions, viewSelector, my_logger):
+    excluded_series = []
+
     ## Remove duplicates
     # Type 1 - Same location, different series
     slice_locations = [] # Only consider slices not already excluded
@@ -47,11 +49,15 @@ def handle_duplicates(view_predictions, viewSelector, my_logger):
             idx_max = np.argmax(confidences)
             idx_to_exclude = [i for i in range(len(repeated_series_num)) if i != idx_max]
 
-            view_predictions.loc[view_predictions['Series Number'].isin(repeated_series_num[idx_to_exclude]), 'Predicted View'] = 'Excluded'
+            for i in idx_to_exclude:
+                original_vp = view_predictions[view_predictions['Series Number'] == repeated_series_num[i]]['Predicted View'].values[0]
 
-            kept_series_num = repeated_series_num[idx_max]
+                # Format is series number, original view prediction, reason for exclusion, series number of kept series
+                excluded_series.append([repeated_series_num[i], original_vp, 'Same location', repeated_series_num[idx_max]])
+                my_logger.info(f'Excluded series {repeated_series_num[i]} as it exists at the same slice location as another series ({repeated_series_num[idx_max]}).')
 
-            my_logger.info(f'Excluded series {repeated_series_num[idx_to_exclude]} as they exist at the same slice location as another series ({kept_series_num}).') # TODO: Log which series
+                # Exclude from predictions
+                view_predictions.loc[view_predictions['Series Number'] == repeated_series_num[i], 'Predicted View'] = 'Excluded'
 
     # Type 2 - Multiple series classed as the same 'exclusive' view (i.e. 2ch, 3ch, 4ch, RVOT, RVOT-T, 2ch-RT, LVOT) 
     # i.e. a view that should only have one series 
@@ -64,17 +70,24 @@ def handle_duplicates(view_predictions, viewSelector, my_logger):
         series_nums = np.array(series_nums)
 
         if len(series) > 1:
-            my_logger.info(f'Multiple series classed as {view} ({series_nums}).')
-
             confidences = [view_predictions[view_predictions['Series Number'] == x]['Confidence'].values[0] for x in series_nums]
 
             idx_max = np.argmax(confidences)
             idx_to_exclude = [i for i in range(len(series)) if i != idx_max]
-            view_predictions.loc[view_predictions['Series Number'].isin(series_nums[idx_to_exclude]), 'Predicted View'] = 'Excluded'
 
-            my_logger.info(f'Excluded series {series_nums[idx_to_exclude]}')
+            for i in idx_to_exclude:
+                original_vp = view_predictions[view_predictions['Series Number'] == series_nums[i]]['Predicted View'].values[0]
 
-    return view_predictions
+                # Format is series number, original view prediction, reason for exclusion, series number of kept series
+                excluded_series.append([series_nums[i], original_vp, 'Same exclusive view', series_nums[idx_max]])
+                my_logger.info(f'Excluded series {series_nums[i]} as belongs to same exclusive view ({original_vp}) as {series_nums[idx_max]}.')
+
+                # Exclude from predictions
+                view_predictions.loc[view_predictions['Series Number'] == series_nums[i], 'Predicted View'] = 'Excluded'
+            
+    excluded_df = pd.DataFrame(excluded_series, columns=['Excluded Series', 'Original View', 'Reason', 'Kept Series'])
+
+    return view_predictions, excluded_df
 
 def correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger):
     gui = VSGUI(patient, dst, viewSelector, my_logger)
@@ -82,6 +95,7 @@ def correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger):
 
     # Load the corrected predictions
     view_predictions = pd.read_csv(csv_path)
+    viewSelector.show_warnings = False
     viewSelector.load_predictions()
     view_predictions.to_csv(states_path, mode='w', index=False) # Save to states path
 
@@ -174,7 +188,10 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
             if row['Frames Per Slice'] != num_phases:
                 my_logger.warning(f"Series {row['Series Number']} has a mismatching number of phases ({row['Frames Per Slice']} vs {num_phases}).")
 
-        view_predictions = handle_duplicates(view_predictions, viewSelector, my_logger) # If duplicate slices are found, choose which ones to keep based on quality (approximated by confidence in prediction)
+        view_predictions, excluded_df = handle_duplicates(view_predictions, viewSelector, my_logger) # If duplicate slices are found, choose which ones to keep based on quality (approximated by confidence in prediction)
+
+        # Add excluded series info to view selector
+        viewSelector.excluded_df = excluded_df
 
         # Print summary to log
         my_logger.success(f'View predictions for {patient}:')
@@ -274,7 +291,10 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
             if row['Frames Per Slice'] != num_phases:
                 my_logger.warning(f"Series {row['Series Number']} has a mismatching number of phases ({row['Frames Per Slice']} vs {num_phases}).")
 
-        view_predictions = handle_duplicates(view_predictions, viewSelector, my_logger) # If duplicate slices are found, choose which ones to keep based on quality (approximated by confidence in prediction)
+        view_predictions, excluded_df = handle_duplicates(view_predictions, viewSelector, my_logger) # If duplicate slices are found, choose which ones to keep based on quality (approximated by confidence in prediction)
+
+        # Add excluded series info to view selector
+        viewSelector.excluded_df = excluded_df
 
         # Print summary to log
         my_logger.success(f'View predictions for {patient}:')
