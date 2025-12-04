@@ -149,6 +149,13 @@ class VSGUI:
             else:
                 self.img_dict[series].append((i, frame))
 
+        # Set base image size
+        base_image_size = 150  # Base size for images in pixels (width=height)
+        if len(self.img_dict.keys()) > 24:
+            base_image_size = 100
+        elif len(self.img_dict.keys()) > 48:
+            base_image_size = 75
+
         for series in self.img_dict.keys():
             # Get view classification
             vp = self.view_predictions[self.view_predictions['Series Number'] == series]
@@ -177,7 +184,7 @@ class VSGUI:
             loaded_images = []
             for img_path in self.img_dict[series]:
                 image = Image.open(img_path[0])
-                image = image.resize((int(150*self.scaling), int(image.size[1] * 150 * self.scaling / image.size[0]))) # Scale from width, height of 150 pixels based on screen width
+                image = image.resize((int(base_image_size*self.scaling), int(image.size[1] * base_image_size * self.scaling / image.size[0]))) # Scale from width, height of base image size based on screen width
                 image_tk = ImageTk.PhotoImage(image)
                 loaded_images.append(image_tk)
 
