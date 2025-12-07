@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import optimize
 from scipy.spatial import cKDTree
+from plotly import graph_objects as go
 from bivme.fitting.surface_enum import Surface
 
 
@@ -66,6 +67,28 @@ def rodrigues_rot(P, n0, n1):
         P_rot[i] = P[i] * np.cos(theta) + np.cross(k, P[i]) * np.sin(theta) + k * np.dot(k, P[i]) * (1 - np.cos(theta))
 
     return P_rot
+
+def Plot3DPoint(points, color_markers, size_markers,nameplot = " "):
+    """ Plot 3D points
+        Input: 
+            points: 3D points
+            color_markers: color of the markers 
+            size_markers: size of the markers 
+            nameplot: plot name (default: " ")
+
+        Output:
+            trace: trace for figure
+    """
+
+    trace = go.Scatter3d(
+             x=points[:,0],
+             y=points[:,1],
+             z=points[:,2],
+             name = nameplot,
+             mode='markers',
+             marker=dict(size=size_markers,opacity=1.0,color = color_markers)
+            )
+    return [trace]
 
 # @profile
 def LineIntersection(ImagePositionPatient, ImageOrientationPatient, P0, P1):
