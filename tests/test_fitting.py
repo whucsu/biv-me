@@ -1,9 +1,7 @@
-import numpy as np
 from bivme.fitting.perform_fit import perform_fitting
-from bivme import TEST_RESOURCE_DIR, MODEL_RESOURCE_DIR
+from bivme import TEST_RESOURCE_DIR
 from . import CURRENT_RESIDUALS
 import shutil
-from pathlib import Path
 import tomli
 def test_performed_fit():
 

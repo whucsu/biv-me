@@ -194,7 +194,6 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
 
     with Progress(transient=True) as progress:
         task = progress.add_task(f"Plotting guidepoints", total=len(frames_to_fit))
-        console = progress
 
         image_grids = {}
 

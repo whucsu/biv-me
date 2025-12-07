@@ -8,15 +8,11 @@ import re
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import time
 import csv
 from loguru import logger
-from scipy.spatial import cKDTree
-from scipy.spatial.distance import cdist
 import argparse
 import fnmatch
 from rich.progress import Progress
-from bivme.meshing.mesh import Mesh
 from bivme import MODEL_RESOURCE_DIR
 import scipy.io
 
