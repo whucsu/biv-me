@@ -193,7 +193,7 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
     Path(output_folder).mkdir(parents=True, exist_ok=True)
 
     with Progress(transient=True) as progress:
-        task = progress.add_task(f"Processing {len(frames_to_fit)} frames", total=len(frames_to_fit))
+        task = progress.add_task(f"Plotting guidepoints", total=len(frames_to_fit))
         console = progress
 
         image_grids = {}
@@ -211,7 +211,7 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
                 str(filename_info),
                 case,
                 sampling=1,
-                time_frame_number=num,
+                frame_num=num,
             )
 
             if not data_set.success:
