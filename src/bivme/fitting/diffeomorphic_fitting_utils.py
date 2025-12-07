@@ -43,7 +43,6 @@ def solve_convex_fast(
     residuals = final_stats["weighted_rmse"]
 
     my_logger.success(f"End of the explicitly constrained fit. Time taken: {final_time}")
-    my_logger.success(f"PARAMS FOR TESTING: {iters} {residuals} {final_time}")
 
     return residuals
 

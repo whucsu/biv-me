@@ -168,7 +168,6 @@ def prepare_all_gp_datasets(config,
         set_default_weights(data_set)  # Example on how to set different weights for different points group (R.B.)
 
         gp_dataset_list.append(data_set)
-        logger.info(f"[CHECKPOINT][GP] Prepared guide point for phase {frame_num}")
 
     return gp_dataset_list
 
