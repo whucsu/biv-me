@@ -28,14 +28,14 @@ def solve_convex_fast(
     fitter = ExplicitFitterNumpy(logger, biv_model, weight_gp, data_set)
 
     # Solve and update mesh
-    new_mesh, final_stats = fitter.explicit_refine_osqp_style(max_outer=5,
+    new_mesh, final_stats = fitter.explicit_refine_osqp_style(max_outer=10,
                                                               min_jacobian=0.1,
                                                               transmural_weight=transmural_weight,
                                                               smoothing_weight=low_smoothing_weight,
                                                               tau=1 / 3,
                                                               resid_conv_tol=5e-4,
                                                               disp_conv_tol=1e-4,
-                                                              relinearize=False)
+                                                              relinearize=True)
     biv_model.update_control_mesh(new_mesh)
 
     final_time = time.time() - start_time
@@ -86,7 +86,7 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
     # Establish implicit fitting parameters
     lambda_high = weight_gp * 1e10  # First regularization weight (dynamic)
     lambda_low = weight_gp * 1e2  # Lowest regularization weight
-    num_iters = 20  # Maximum number of iterations
+    num_iters = 30  # Maximum number of iterations
     iteration = 0
     factor = 10  # Initial lambda reduction factor (dynamic)
     min_jacobian = 0.1  # Minimum allowed Jacobian
