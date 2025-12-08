@@ -90,14 +90,18 @@ class ExplicitFitterNumpy:
                 self.logger.info(f" Iteration {k}: STOP -> Displacement converged")
                 break
 
-            # 4) Accept step
+            # 4) RMSE before accepting
+            res = self.rmse(P, M_try, y)
+            a = step_log["alpha"]
+
+            if res > last_res:
+                self.logger.info(f" Iteration {k}: STOP -> RMSE diverged (last {last_res:.6f} vs new {res:.6f})")
+                break
+
+            # 5) Accept step
             M = M_try
             d_prev = d_new
             self.biv_model.update_control_mesh(M)
-
-            # 5) RMSE on the accepted mesh
-            res = self.rmse(P, M, y)
-            a = step_log["alpha"]
 
             # 6) Optional: re-linearize correspondences (recommended for extra drop)
             if relinearize:
