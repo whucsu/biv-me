@@ -1,6 +1,4 @@
-#from __future__ import annotations
 import numpy as np
-import pyvista as pv
 import argparse
 import os, sys
 from pathlib import Path
@@ -8,11 +6,8 @@ import re
 import fnmatch
 from copy import deepcopy
 from plotly.offline import plot
-import plotly.graph_objs as go
 
-from bivme.meshing.mesh_io import write_vtk_surface, export_to_obj
 from bivme import MODEL_RESOURCE_DIR
-from bivme.meshing.mesh import Mesh
 from bivme.fitting.BiventricularModel import BiventricularModel
 from loguru import logger
 from rich.progress import Progress
@@ -21,13 +16,13 @@ import shutil
 from bivme.fitting.surface_enum import Surface
 from bivme.fitting.surface_enum import ContourType
 from bivme.fitting.GPDataSet import GPDataSet
-import pandas as pd 
 
 biv_model_folder = MODEL_RESOURCE_DIR
 from bivme.fitting.diffeomorphic_fitting_utils import (
     solve_least_squares_problem,
-    solve_convex_problem,
+    solve_convex_fast,
 )
+from bivme.fitting.perform_fit import write_all_biv_models
 
 # mapping 
 contour_map = {
@@ -43,7 +38,7 @@ contour_map = {
    # : ContourType.SAX_RV_EPICARDIAL
    # : ContourType.SAX_LV_EPICARDIAL
 
-def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, output_folder: os.PathLike, biv_model_folder: os.PathLike = MODEL_RESOURCE_DIR, output_format: str =".vtk", gp_suffix: str ="") -> None:
+def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, output_folder: os.PathLike, biv_model_folder: os.PathLike = MODEL_RESOURCE_DIR) -> None:
     """
         # Authors: cm
         # Date: 09/24
@@ -93,164 +88,25 @@ def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, outp
         gp_dataset.tricuspid_centroid = fitted_model.et_pos[fitted_model.get_surface_vertex_start_end_index(Surface.TRICUSPID_VALVE)[1],:]
 
         reference_biventricular_model.update_pose_and_scale(gp_dataset)
-        solve_least_squares_problem(reference_biventricular_model, config["fitting_weights"]["guide_points"], gp_dataset, logger, collision_detection=True, model_prior = fitted_model)
+
+        # Get config parameters upfront
+        gp_weight = config["fitting_weights"]["guide_points"]
+        conv_weight = config["fitting_weights"]["convex_problem"]
+        trans_weight = config["fitting_weights"]["transmural"]
+        lsq_trans_weight = 0.001
+
+        # Perform least squares fit
+        biv_model = reference_biventricular_model.copy()
+        solve_least_squares_problem(biv_model, gp_weight, gp_dataset, lsq_trans_weight, collision_detection=True, model_prior = fitted_model, my_logger=logger)
   
         ## Perform diffeomorphic fit
-        residuals += solve_convex_problem(
-            reference_biventricular_model,
-            gp_dataset,
-            config["fitting_weights"]["guide_points"],
-            config["fitting_weights"]["convex_problem"],
-            config["fitting_weights"]["transmural"],
-            logger, 
-            collision_detection=True, 
-            model_prior = fitted_model
-        )
+        residuals = solve_convex_fast(biv_model, gp_weight, conv_weight, trans_weight, collision_detection=True, model_prior = fitted_model, my_logger=logger)
 
-        # save results in .txt format, one file for each frame
-        model_data = {
-            "x": reference_biventricular_model.control_mesh[:, 0],
-            "y": reference_biventricular_model.control_mesh[:, 1],
-            "z": reference_biventricular_model.control_mesh[:, 2],
-            "Frame": [-1] * len(reference_biventricular_model.control_mesh[:, 2]),
-        }
-
-        model_data_frame = pd.DataFrame(data=model_data)
-
-        with open(Path(output_folder) / model_file.name, "w") as file:
-            file.write(
-                model_data_frame.to_csv(
-                    header=True, index=False, sep=",", lineterminator="\n"
-                )
-            )
-        if output_format != "none":
-            meshes = {}
-            for surface in Surface:
-                mesh_data = {}
-                if surface.name in config["output"]["output_meshes"]:
-                    mesh_data[surface.name] = surface.value
-                    if surface.name == "LV_ENDOCARDIAL" and config["output"]["closed_mesh"] == True:
-                        mesh_data["MITRAL_VALVE"] = Surface.MITRAL_VALVE.value
-                        mesh_data["AORTA_VALVE"] = Surface.AORTA_VALVE.value
-                    if surface.name == "EPICARDIAL" and config["output"]["closed_mesh"] == True:
-                        mesh_data["PULMONARY_VALVE"] = Surface.PULMONARY_VALVE.value
-                        mesh_data["TRICUSPID_VALVE"] = Surface.TRICUSPID_VALVE.value
-                        mesh_data["MITRAL_VALVE"] = Surface.MITRAL_VALVE.value
-                        mesh_data["AORTA_VALVE"] = Surface.AORTA_VALVE.value
-                    meshes[surface.name] = mesh_data
-
-            if "RV_ENDOCARDIAL" in config["output"]["output_meshes"]:
-                mesh_data["RV_SEPTUM"] = Surface.RV_SEPTUM.value
-                mesh_data["RV_FREEWALL"] = Surface.RV_FREEWALL.value
-                if config["output"]["closed_mesh"]:
-                    mesh_data["PULMONARY_VALVE"] = Surface.PULMONARY_VALVE.value
-                    mesh_data["TRICUSPID_VALVE"] = Surface.TRICUSPID_VALVE.value
-                meshes["RV_ENDOCARDIAL"] = mesh_data
-
-            ##TODO remove duplicated code here - not sure how yet
-            if config["output"]["export_control_mesh"]:
-                control_mesh_meshes = {}
-                for surface in ControlMesh:
-                    control_mesh_mesh_data = {}
-                    if surface.name in config["output"]["output_meshes"]:
-                        control_mesh_mesh_data[surface.name] = surface.value
-                        if surface.name == "LV_ENDOCARDIAL" and config["output"]["closed_mesh"] == True:
-                            control_mesh_mesh_data["MITRAL_VALVE"] = ControlMesh.MITRAL_VALVE.value
-                            control_mesh_mesh_data["AORTA_VALVE"] = ControlMesh.AORTA_VALVE.value
-                        if surface.name == "EPICARDIAL" and config["output"]["closed_mesh"] == True:
-                            control_mesh_mesh_data["PULMONARY_VALVE"] = ControlMesh.PULMONARY_VALVE.value
-                            control_mesh_mesh_data["TRICUSPID_VALVE"] = ControlMesh.TRICUSPID_VALVE.value
-                            control_mesh_mesh_data["MITRAL_VALVE"] = ControlMesh.MITRAL_VALVE.value
-                            control_mesh_mesh_data["AORTA_VALVE"] = ControlMesh.AORTA_VALVE.value
-                        if surface.name == "RV_ENDOCARDIAL" and config["output"]["closed_mesh"] == True:
-                            control_mesh_mesh_data["PULMONARY_VALVE"] = ControlMesh.PULMONARY_VALVE.value
-                            control_mesh_mesh_data["TRICUSPID_VALVE"] = ControlMesh.TRICUSPID_VALVE.value
-
-                        control_mesh_meshes[surface.name] = control_mesh_mesh_data
-
-            for key, value in meshes.items():
-                vertices = np.array([]).reshape(0, 3)
-                faces_mapped = np.array([], dtype=np.int64).reshape(0, 3)
-
-                offset = 0
-                for type in value:
-                    start_fi = reference_biventricular_model.surface_start_end[value[type]][0]
-                    end_fi = reference_biventricular_model.surface_start_end[value[type]][1] + 1
-                    faces_et = reference_biventricular_model.et_indices[start_fi:end_fi]
-                    unique_inds = np.unique(faces_et.flatten())
-                    vertices = np.vstack((vertices, reference_biventricular_model.et_pos[unique_inds]))
-
-                    # remap faces/indices to 0-indexing
-                    mapping = {old_index: new_index for new_index, old_index in enumerate(unique_inds)}
-                    faces_mapped = np.vstack((faces_mapped, np.vectorize(mapping.get)(faces_et) + offset))
-                    offset += len(reference_biventricular_model.et_pos[unique_inds])
-
-                if output_format == ".vtk":
-                    output_folder_vtk = Path(output_folder, f"vtk{gp_suffix}")
-                    output_folder_vtk.mkdir(exist_ok=True)
-                    mesh_path = Path(
-                        output_folder_vtk, f"{model_file.stem}_{key}.vtk"
-                    )
-                    write_vtk_surface(str(mesh_path), vertices, faces_mapped)
-                    logger.success(f"{model_file.stem}_{key}.vtk successfully saved to {output_folder_vtk}")
-
-                elif output_format == ".obj":
-                    output_folder_obj = Path(output_folder, f"obj{gp_suffix}")
-                    output_folder_obj.mkdir(exist_ok=True)
-                    mesh_path = Path(
-                        output_folder_obj, f"{model_file.stem}_{key}.obj"
-                    )
-                    export_to_obj(mesh_path, vertices, faces_mapped)
-                    logger.success(f"{model_file.stem}_{key}.obj successfully saved to {output_folder_obj}")
-                else:
-                    logger.error('argument format must be .obj or .vtk')
-                    return -1
-
-            ##TODO remove duplicated code here - not sure how yet
-            if config["output"]["export_control_mesh"]:
-                for key, value in control_mesh_meshes.items():
-                    vertices = np.array([]).reshape(0, 3)
-                    faces_mapped = np.array([], dtype=np.int64).reshape(0, 3)
-
-                    offset = 0
-                    for type in value:
-                        start_fi = reference_biventricular_model.control_mesh_start_end[value[type]][0]
-                        end_fi = reference_biventricular_model.control_mesh_start_end[value[type]][1] + 1
-                        faces_et = reference_biventricular_model.et_indices_control_mesh[start_fi:end_fi]
-                        unique_inds = np.unique(faces_et.flatten())
-                        vertices = np.vstack((vertices, reference_biventricular_model.control_mesh[unique_inds]))
-
-                        # remap faces/indices to 0-indexing
-                        mapping = {old_index: new_index for new_index, old_index in enumerate(unique_inds)}
-                        faces_mapped = np.vstack((faces_mapped, np.vectorize(mapping.get)(faces_et) + offset))
-                        offset += len(reference_biventricular_model.control_mesh[unique_inds])
-
-                    if output_format == ".vtk":
-                        output_folder_vtk = Path(output_folder, f"vtk{gp_suffix}")
-                        output_folder_vtk.mkdir(exist_ok=True)
-                        mesh_path = Path(
-                            output_folder_vtk, f"{model_file.stem}_{key}_control_mesh.vtk"
-                        )
-                        write_vtk_surface(str(mesh_path), vertices, faces_mapped)
-                        logger.success(f"{model_file.stem}_{key}_control_mesh.vtk successfully saved to {output_folder_vtk}")
-
-                    elif output_format == ".obj":
-                        output_folder_obj = Path(output_folder, f"obj{gp_suffix}")
-                        output_folder_obj.mkdir(exist_ok=True)
-                        mesh_path = Path(
-                            output_folder_obj, f"{model_file.stem}_{key}_control_mesh.obj"
-                        )
-                        export_to_obj(mesh_path, vertices, faces_mapped)
-                        logger.success(f"{model_file.stem}_{key}_control_mesh.obj successfully saved to {output_folder_obj}")
-                    else:
-                        logger.error('argument format must be .obj or .vtk')
-                        return -1
-
-        return residuals
+        return biv_model, residuals
 
     else:
         logger.success(f"No intersection detected for {case_name} - moving on")
-        return
+        return None
 
 
 if __name__ == "__main__":
@@ -301,7 +157,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
     # save config file to the output folder
-    output_folder = Path(config["output"]["output_directory"]) / "corrected_models"
+    output_folder = Path(config["output"]["output_directory"]) # Save in place
     output_folder.mkdir(parents=True, exist_ok=True)
     shutil.copy(args.config_file, output_folder)
 
@@ -316,15 +172,25 @@ if __name__ == "__main__":
                 rule = re.compile(fnmatch.translate("*model_frame*.txt"), re.IGNORECASE)
                 models = [folder / Path(name) for name in os.listdir(Path(folder)) if rule.match(name)]
                 models = sorted(models)
+                model_dict = {}
+                case_name = os.path.basename(os.path.normpath(folder))
 
                 logger.info(f"Processing {str(folder)} ({i+1}/{len(folders)})")
                 with Progress(transient=True) as progress:
                     task = progress.add_task("Checking for intersection...", total=len(models))
                     console = progress
 
-                    for biv_model_file in models:
-                        fix_intersection(folder, config, biv_model_file, output_folder, biv_resource_folder, output_format = config["output"]["mesh_format"], gp_suffix=config["input"]["gp_suffix"])
+                    for idx, biv_model_file in enumerate(models):
+                        pack = fix_intersection(folder, config, biv_model_file, output_folder, biv_resource_folder)
+                        if pack is not None:
+                            corrected_model, res = pack
+                            model_dict[idx] = corrected_model
+                            
                         progress.advance(task)
+
+                # Export corrected models
+                if len(model_dict) > 0:
+                    write_all_biv_models(config, model_dict, config["output_fitting"]["mesh_format"], output_folder / case_name, case_name, logger)
 
         logger.success(f"Done. Results are saved in {output_folder}")
     except KeyboardInterrupt:
