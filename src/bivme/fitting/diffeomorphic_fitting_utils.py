@@ -1,7 +1,9 @@
 import time
 
+from .surface_enum import Surface
 from bivme.fitting import BiventricularModel
 from bivme.fitting import GPDataSet
+
 import numpy as np
 from loguru import logger
 
@@ -17,7 +19,9 @@ def solve_convex_fast(
         weight_gp: float,
         low_smoothing_weight: float,
         transmural_weight: float,
-        my_logger: logger) -> float:
+        collision_detection: bool = False,
+        model_prior: BiventricularModel = None,
+        my_logger: logger=logger) -> float:
     """
     This function performs an accelerated diffeomorphic fit with numpy.
     """
@@ -25,7 +29,7 @@ def solve_convex_fast(
     my_logger.info(f"START -> Explicit OSQP-style fitting...")
 
     # Set up fitter
-    fitter = ExplicitFitterNumpy(logger, biv_model, weight_gp, data_set)
+    fitter = ExplicitFitterNumpy(logger, biv_model, weight_gp, data_set, collision_detection, model_prior)
 
     # Solve and update mesh
     new_mesh, final_stats = fitter.explicit_refine_osqp_style(max_outer=10,
@@ -75,12 +79,43 @@ def fit_least_squares_model(biv_model,
 
     return solf, err
 
+def fit_least_squares_model_with_prior(biv_model, 
+                                       weight_gp, 
+                                       prior_model, 
+                                       trans_weight, 
+                                       smoothing_factor):
+
+    projected_points_basis_coeff = biv_model.basis_matrix
+    data_points_position = prior_model.et_pos
+    w = weight_gp * np.ones((biv_model.et_pos.shape[0], 1))
+
+    prior_position = projected_points_basis_coeff @ biv_model.control_mesh
+    w_pg = projected_points_basis_coeff * w  # Element-wise multiply each row by the corresponding weight
+    GTPTWTWPG = w_pg.T @ w_pg
+
+    # Gram Matrix + Regularization (LHS)
+    smooth_constraint = (biv_model.gtstsg_x + biv_model.gtstsg_y + (trans_weight * biv_model.gtstsg_z))
+    regularizer = smoothing_factor * smooth_constraint
+    A = GTPTWTWPG + regularizer
+
+    # Weighted residuals (RHS)
+    wd = (data_points_position - prior_position) * w
+    rhs = w_pg.T @ wd
+
+    # Solve least squares problem
+    solf = np.linalg.solve(A.T.dot(A), A.T.dot(rhs))
+    err = np.sqrt(np.mean(np.sum((data_points_position - prior_position) ** 2, axis=1)))
+
+    return solf, err
 
 def solve_least_squares_problem(biv_model: BiventricularModel,
                                 weight_gp: float,
                                 data_set: GPDataSet,
                                 trans_weight,
-                                my_logger):
+                                collision_detection: bool=False,
+                                model_prior: BiventricularModel = None,
+                                my_logger: logger = logger
+                               ):
     start_time = time.time()
 
     # Establish implicit fitting parameters
@@ -93,6 +128,7 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
     err = float('nan')
     last_err = float('nan')
     diffeo_tries = 0
+    collision_iteration = 1
 
     residual_conv_tol = 5e-4
     disp_conv_tol = 1e-4
@@ -107,29 +143,54 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
             my_logger.info(f"STOP -> Could not find diffeomorphic solution.")
             break
 
-        displacement, err = fit_least_squares_model(biv_model, weight_gp, data_set, trans_weight, lambda_high)
-        my_logger.info(f"     Iteration {iteration}     Weight {lambda_high}    ICF error {err}")
+        if collision_detection and (collision_iteration > 3):
+            my_logger.info(f"STOP -> Reached maximum collision iterations.")
+            break
+
+        if collision_detection:
+            displacement, err = fit_least_squares_model_with_prior(biv_model, weight_gp, model_prior, trans_weight, lambda_high)
+        else:
+            displacement, err = fit_least_squares_model(biv_model, weight_gp, data_set, trans_weight, lambda_high)
+
+        my_logger.info(f"     Iteration {iteration} Weight {lambda_high}    ICF error {err}")
 
         mesh_try = biv_model.control_mesh + displacement
         if biv_model.is_diffeomorphic(mesh_try, min_jacobian):
-            diffeo_tries = 0
-            biv_model.update_control_mesh(mesh_try)
+            update_mesh = True
+            if collision_detection:
+                current_collision = mesh_try.detect_collision()
+                inter = current_collision.difference(mesh_try.reference_collision) 
+                if bool(inter):
+                    # if there is a collision detected, we update the prior to the current RV shape and keep doing the fitting to get a closer LV shape to the original
+                    # update prior
+                    my_logger.info(f"     Collision detected, updating prior model and refitting...")
+                    for surface in [Surface.RV_SEPTUM, Surface.RV_FREEWALL, Surface.RV_INSERT]:
+                        surface_index = biv_model.get_surface_vertex_start_end_index(surface)
+                        model_prior.et_pos[surface_index[0]:surface_index[1] + 1, :] = biv_model.et_pos[surface_index[0]:surface_index[1]+1, :]
 
-            # Check early-stop residual convergence
-            resid_converged = (abs(last_err - err) / max(last_err, EPSILON)) < residual_conv_tol
-            if resid_converged:
-                my_logger.info(f"STOP -> Residuals converged.")
-                break
+                    collision_iteration += 1
+                    update_mesh = False
 
-            # Check early-stop displacement convergence
-            disp_converged = (np.linalg.norm(displacement) < disp_conv_tol)
-            if disp_converged:
-                my_logger.info(f"STOP -> Displacement vector converged.")
-                break
+            if update_mesh:
+                diffeo_tries = 0
+                biv_model.update_control_mesh(mesh_try)
 
-            last_err = err
-            factor = max(factor - 1, 2)  # Dynamic factor reduction (decay-like reduction)
-            lambda_high = (lambda_high / factor)  # we divide weight by 'factor' and start again...
+                # Check early-stop residual convergence
+                resid_converged = (abs(last_err - err) / max(last_err, EPSILON)) < residual_conv_tol
+                if resid_converged:
+                    my_logger.info(f"STOP -> Residuals converged.")
+                    break
+
+                # Check early-stop displacement convergence
+                disp_converged = (np.linalg.norm(displacement) < disp_conv_tol)
+                if disp_converged:
+                    my_logger.info(f"STOP -> Displacement vector converged.")
+                    break
+
+                last_err = err
+                factor = max(factor - 1, 2)  # Dynamic factor reduction (decay-like reduction)
+                lambda_high = (lambda_high / factor)  # we divide weight by 'factor' and start again...
+
         else:
             diffeo_tries += 1
             # If not diffeomorphic, the model is not updated.

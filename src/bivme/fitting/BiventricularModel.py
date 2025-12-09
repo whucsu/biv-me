@@ -1,3 +1,6 @@
+import functools
+import pyvista as pv
+import plotly.graph_objs as go
 from scipy.io import loadmat
 from scipy.spatial import cKDTree
 from collections import OrderedDict
@@ -7,7 +10,7 @@ from .GPDataSet import *
 from .surface_enum import Surface
 from .surface_enum import SURFACE_CONTOUR_MAP
 from .build_model_tools import *
-
+from bivme.meshing.mesh import Mesh
 
 ##Author : Charlène Mauger, University of Auckland, c.mauger@auckland.ac.nz
 class BiventricularModel:
@@ -275,6 +278,9 @@ class BiventricularModel:
 
         # Collision detection on or off
         self.collision_detection = collision_detection
+
+        if collision_detection:
+            self.reference_collision = set(self.detect_collision())
 
         # Through-wall mesh indices for myocardial mass calculations
         et_index_thru_wall_file = control_mesh_dir / "thru_wall_et_indices.txt"
@@ -833,6 +839,179 @@ class BiventricularModel:
         """
         self.control_mesh = new_control_mesh
         self.et_pos = self.matrix @ self.control_mesh
+
+    def detect_collision(self, debug: bool = False) -> list:
+        ##TODO Initialise pv meshes is collision detection set to on
+        model = Mesh('mesh')
+        model.set_nodes(self.et_pos)
+        model.set_elements(self.et_indices)
+
+        ## convert labels to integer corresponding to the sorted list of unique labels types
+        unique_material = np.unique(self.material[:,1])
+
+        materials = np.zeros(self.material.shape)
+        for index, m in enumerate(unique_material):
+            face_index = self.material[:, 1] == m
+            materials[face_index, 0] = self.material[face_index, 0].astype(int)
+            materials[face_index, 1] = [index] * np.sum(face_index)
+
+        model.set_materials(materials[:, 0], materials[:, 1])
+        # components list, used to get the correct mesh components:
+        # ['0 AORTA_VALVE' '1 AORTA_VALVE_CUT' '2 LV_ENDOCARDIAL' '3 LV_EPICARDIAL'
+        # ' 4 MITRAL_VALVE' '5 MITRAL_VALVE_CUT' '6 PULMONARY_VALVE' '7 PULMONARY_VALVE_CUT'
+        # '8 RV_EPICARDIAL' '9 RV_FREEWALL' '10 RV_SEPTUM' '11 TRICUSPID_VALVE'
+        # '12 TRICUSPID_VALVE_CUT', '13' THRU WALL]
+
+        rv_fw = model.get_mesh_component([9], reindex_nodes=False)
+        rv_septum = model.get_mesh_component([10], reindex_nodes=False)
+
+        rv_fw_faces = rv_fw.elements
+        rv_fw_et = np.pad(rv_fw_faces, ((0, 0), (1, 0)), 'constant', constant_values=3)
+        rv_septum_et = np.pad(rv_septum.elements, ((0, 0), (1, 0)), 'constant', constant_values=3)       
+
+        rvfw_mesh = pv.PolyData(rv_fw.nodes, rv_fw_et)
+        rvs_mesh = pv.PolyData(rv_septum.nodes, rv_septum_et)
+
+        collision, n_contacts = rvs_mesh.collision(rvfw_mesh, contact_mode=0, cell_tolerance=0)  
+
+        scalars = np.zeros(collision.n_cells, dtype=bool)
+        scalars[collision.field_data['ContactCells']] = True
+
+        if debug:
+            pl = pv.Plotter()
+            _ = pl.add_mesh(
+                collision,
+                scalars=scalars,
+                show_scalar_bar=False,
+                cmap='bwr',)
+
+            _ = pl.add_mesh(
+                rvfw_mesh,
+                style='wireframe',
+                color='k',
+                show_edges=True,)
+            pl.show()
+
+        return set(collision.field_data['ContactCells'])
+
+    def plot_surface(
+        self, face_color_lv: str="rgb(0,127,0)", face_color_rv : str="rgb(0,127,127)", face_color_epi : str="rgb(127,0,0)", surface: str="all"
+    ) -> list:
+        """Plot 3D model.
+
+        Parameters
+        -----------
+
+        `face_color_lv` LV_ENDOCARDIAL surface color
+        `face_color_rv` RV surface color
+        `face_color_epi` Epicardial color
+        `surface` surface to plot, default all = entire surface,
+                    endo = endocardium, epi = epicardium
+        Returns
+        --------
+        `triangles_epi` Nx3 array[int] triangles defining the epicardium surface
+        `triangles_lv` Nx3 array[int] triangles defining the LV endocardium
+        surface
+        `triangles_RV` Nx3 array[int]  triangles defining the RV surface
+        `lines` lines that need to be plotted
+        """
+
+        if surface not in ["all", "endo", "epi"] :
+            logger.warning(f"Invalid surface argument in BiventricularModel::plot_surface. Got {surface}. Possible values (all, endo, epi). The model will not show on the htlm file")
+            return []
+
+        x = np.array(self.et_pos[:, 0]).T
+        y = np.array(self.et_pos[:, 1]).T
+        z = np.array(self.et_pos[:, 2]).T
+
+        surface_enum = []
+        if surface == "endo" or surface == "all":
+            surface_enum.append({
+                "surface": Surface.LV_ENDOCARDIAL,
+                "color": face_color_lv,
+                "name": "LV endocardium",
+                "opacity": 1
+            })
+            surface_enum.append({
+                "surface": Surface.RV_FREEWALL,
+                "color": face_color_rv,
+                "name": "RV free wall",
+                "opacity": 1
+            })
+            surface_enum.append({
+                "surface": Surface.RV_SEPTUM,
+                "color": face_color_rv,
+                "name": "RV septum",
+                "opacity": 1
+            })
+
+        if surface == "all":
+            surface_enum.append({
+                "surface": Surface.EPICARDIAL,
+                "color": face_color_epi,
+                "name": "Epicardium",
+                "opacity": 0.4
+            })
+
+        if surface == "epi": # we do not append here
+            surface_enum = [{
+                "surface": Surface.EPICARDIAL,
+                "color": face_color_epi,
+                "name": "Epicardium",
+                "opacity": 1
+            }]
+
+        output = []
+
+        for surface_type in surface_enum:
+            surface_index = self.get_surface_start_end_index(surface_type["surface"])
+
+            ijk = [np.asarray(self.et_indices[surface_index[0]: surface_index[1] + 1, idx]) for idx in range(0,3)]
+
+            simplices = [self.et_indices[surface_index[0] : surface_index[1] + 1, idx] for idx in range(0,3)]
+
+            points_3d = np.vstack(
+                (self.et_pos[:, 0], self.et_pos[:, 1], self.et_pos[:, 2])
+            ).T
+
+            tri_vertices = list(map(lambda index: points_3d[index], np.asarray(simplices).T))
+            triangles = go.Mesh3d(
+                x=x,
+                y=y,
+                z=z,
+                color=surface_type["color"],
+                i=ijk[0],
+                j=ijk[1],
+                k=ijk[2],
+                opacity=surface_type["opacity"],
+                name=surface_type["name"],
+                showlegend=True,
+            )
+
+            output.append(triangles)
+
+            lists_coord = [
+                [[T[k % 3][c] for k in range(4)] + [None] for T in tri_vertices]
+                for c in range(3)
+            ]
+            xe, ye, ze = [
+                functools.reduce(lambda x, y: x + y, lists_coord[k]) for k in range(3)
+            ]
+
+            # define the lines to be plotted
+            lines = go.Scatter3d(
+                x=xe,
+                y=ye,
+                z=ze,
+                mode="lines",
+                line=go.scatter3d.Line(color="rgb(0,0,0)", width=1.5),
+                showlegend=True,
+                name=f"wireframe {surface_type['name']}",
+            )
+
+            output.append(lines)
+
+        return output
 
     def get_intersection_with_plane(self, po: np.ndarray, no: np.ndarray, surface_to_use: Surface = None) -> np.ndarray:
         """Calculate intersection points between a plane with the

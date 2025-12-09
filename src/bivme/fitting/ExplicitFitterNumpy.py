@@ -1,6 +1,9 @@
 import numpy as np
 from typing import Dict, Tuple
 
+from .surface_enum import Surface
+from bivme.fitting import BiventricularModel
+
 EPSILON = 1e-12
 
 
@@ -16,12 +19,17 @@ class ExplicitFitterNumpy:
                  logger,
                  biv_model,
                  weight_gp,
-                 data_set):
+                 data_set,
+                 collision_detection: bool = False,
+                 model_prior: BiventricularModel = None):
+        
         self.biv_model = biv_model
         self.weight_gp = weight_gp
         self.data_set = data_set
         self.logger = logger
         self.dtype = np.float64  # for openblas compatibility
+        self.collision_detection = collision_detection
+        self.model_prior = model_prior
 
         # Jacobian (needed for checking if diffeomorphic) and mbd's for getting G and h constraints
         self.jac_11 = np.asarray(self.biv_model.jac_11, dtype=self.dtype)
@@ -43,9 +51,15 @@ class ExplicitFitterNumpy:
                                    ) -> Tuple[np.array, Dict[str, float]]:
 
         # Pull initial correspondences (fixed Φ, like your OSQP) and data
-        idx, weights, _, phi = self.biv_model.compute_data_xi_fast(self.weight_gp, self.data_set)
-        weights = weights[:, np.newaxis]
-        data_points = self.data_set.points_coordinates[idx]
+        if self.collision_detection:
+            data_points = self.model_prior.et_pos
+            phi = self.biv_model.basis_matrix
+            weights = self.weight_gp * np.ones((self.biv_model.et_pos.shape[0], 1))
+
+        else:
+            idx, weights, _, phi = self.biv_model.compute_data_xi_fast(self.weight_gp, self.data_set)
+            weights = weights[:, np.newaxis]
+            data_points = self.data_set.points_coordinates[idx]
 
         # Spatial regularizer S = gtstsg_x + gtstsg_y + transmural_weight * gtstsg_z
         smooth = (self.biv_model.gtstsg_x + self.biv_model.gtstsg_y + (transmural_weight * self.biv_model.gtstsg_z))
@@ -62,8 +76,15 @@ class ExplicitFitterNumpy:
         k = 0
         last_res = self.rmse(P, M, y)
 
+        collision_iteration = 1
+
         # Outer loop: rebuild G/h constraints with updated mesh, do QP step, check early-stops and diffeo-check
         for k in range(1, max_outer + 1):
+
+            if self.collision_detection and collision_iteration > 3:
+                self.logger.info(f" STOP -> Max collision iterations reached")
+                break
+
             # 1) Rebuild constraint matrix G,h around CURRENT geometry (uses updated mesh)
             G, h = self.build_G_h_from_mbder(M, tau=tau)
 
@@ -89,34 +110,52 @@ class ExplicitFitterNumpy:
             if np.linalg.norm(d_new) < disp_conv_tol:
                 self.logger.info(f" Iteration {k}: STOP -> Displacement converged")
                 break
+            
+            update_mesh = True
 
-            # 4) RMSE before accepting
-            res = self.rmse(P, M_try, y)
-            a = step_log["alpha"]
+            if self.collision_detection:
+                # Collision detection check
+                current_collision = M_try.detect_collision()
+                inter = current_collision.difference(M_try.reference_collision) 
+                if bool(inter):
+                    self.logger.info(f" Iteration {k}: Collision detected, updating prior model and refitting...")
+                    for surface in [Surface.RV_SEPTUM, Surface.RV_FREEWALL, Surface.RV_INSERT]:
+                        surface_index = self.biv_model.get_surface_vertex_start_end_index(surface)
+                        self.model_prior.et_pos[surface_index[0] : surface_index[1] + 1, :] = self.biv_model.et_pos[surface_index[0] : surface_index[1] + 1, :]
 
-            if res > last_res:
-                self.logger.info(f" Iteration {k}: STOP -> RMSE diverged (last {last_res:.6f} vs new {res:.6f})")
-                break
+                    y = self.model_prior.et_pos
 
-            # 5) Accept step
-            M = M_try
-            d_prev = d_new
-            self.biv_model.update_control_mesh(M)
+                    collision_iteration += 1
+                    update_mesh = False
 
-            # 6) Optional: re-linearize correspondences (recommended for extra drop)
-            if relinearize:
-                idx, weights, _, P = self.biv_model.compute_data_xi_fast(self.weight_gp, self.data_set)
-                w = weights[:, np.newaxis]
-                y = self.data_set.points_coordinates[idx]
+            if update_mesh:
+                # 4) RMSE before accepting
+                res = self.rmse(P, M_try, y)
+                a = step_log["alpha"]
 
-            # 7) Early stop if little improvement
-            rel = abs(last_res - res) / max(last_res, EPSILON)
-            if rel < resid_conv_tol:  # tune as you like (your OSQP tol was 5e-4 on residual ratio)
-                self.logger.info(f" Iteration {k}: STOP -> Residuals converged")
-                break
+                if res > last_res:
+                    self.logger.info(f" Iteration {k}: STOP -> RMSE diverged (last {last_res:.6f} vs new {res:.6f})")
+                    break
 
-            last_res = res
-            self.logger.info(f"     Iteration {k}       ECF error {last_res:.6f}")
+                # 5) Accept step
+                M = M_try
+                d_prev = d_new
+                self.biv_model.update_control_mesh(M)
+
+                # 6) Optional: re-linearize correspondences (recommended for extra drop)
+                if relinearize and not self.collision_detection:
+                    idx, weights, _, P = self.biv_model.compute_data_xi_fast(self.weight_gp, self.data_set)
+                    w = weights[:, np.newaxis]
+                    y = self.data_set.points_coordinates[idx]
+
+                # 7) Early stop if little improvement
+                rel = abs(last_res - res) / max(last_res, EPSILON)
+                if rel < resid_conv_tol:  # tune as you like (your OSQP tol was 5e-4 on residual ratio)
+                    self.logger.info(f" Iteration {k}: STOP -> Residuals converged")
+                    break
+
+                last_res = res
+                self.logger.info(f"     Iteration {k}       ECF error {last_res:.6f}")
 
         # Return results
         final_stats = {"weighted_rmse": float(last_res), "iters": k}
