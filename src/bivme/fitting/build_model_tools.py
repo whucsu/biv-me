@@ -57,7 +57,7 @@ def create_ref_dataset(config, folder, output_folder_models, filename_info, case
             return None
 
         result_at_ed = ed_dataset.sinclair_slice_shifting(logger)
-        _, _ = ed_dataset.get_unintersected_slices()
+        _, _ = ed_dataset.get_unintersected_slices_fast()
 
         shift_to_apply = result_at_ed[0]
         updated_slice_position = result_at_ed[1]

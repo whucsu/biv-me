@@ -155,14 +155,11 @@ class GPDataSet(object):
 
         self.number_of_slice = len(self.slice_number)  # slice index starting with 0
 
-        self.sample_contours(points, slices, contour_types, weights, sampling)  # there are
-        # too many
-        # points extracted from cvi files.  To reduce computation time,
-        # the contours points are sampled
+        self.sample_contours(points, slices, contour_types, weights, sampling)  
 
         self.number_of_slice = max(self.slice_number) + 1
 
-    def sample_contours(self, points, slices, contour_types, weights, sample):
+    def sample_contours(self, points, slices, contour_types, weights, sample):        
         for j in np.unique(slices):  # For slice i, extract evenly
             # spaced point for all type
             for contour_index, type in enumerate(SAMPLED_CONTOUR_TYPES):
@@ -232,6 +229,7 @@ class GPDataSet(object):
             return False
         
         return True
+
     @staticmethod
     def convert_contour_types(contours):
         "add by A.Mira on 01/2020"
@@ -357,7 +355,6 @@ class GPDataSet(object):
             index_pixel_spacing = 16
             index_image_id = 3
         # lines = lines[1:]
-
         self.contoured_slices = np.unique(self.slice_number)
 
         slices_to_use = [int(line[index_image_id]) - 1 for line in lines]
@@ -750,7 +747,14 @@ class GPDataSet(object):
             ContourType.LAX_RV_FREEWALL,
             ContourType.LAX_RV_SEPTUM,
             ContourType.LAX_LV_EPICARDIAL,
+            ContourType.LAX_RV_EPICARDIAL,
         )
+
+        lax_slice_idx = np.isin(self.contour_type, lax_registered_contours)
+        lax_slice_ids = np.unique(self.slice_number[lax_slice_idx])
+        if lax_slice_ids.size < 2:
+            # Cannot determine unintersected slices with fewer than 2 LAX slices -- if only 1 then it will 'fail' to intersect with itself
+            return [], np.ones(self.contour_type.shape, dtype=bool)
 
         # Optional: simple cache to avoid recomputing intersections within this call
         intersect_cache = {}
@@ -764,6 +768,7 @@ class GPDataSet(object):
             return len(pts) != 0
 
         redundant_slices = []
+
         for slice_id in np.unique(self.slice_number):
             # If ANY LAX contour intersects, slice is NOT redundant -> short-circuit
             for contour in lax_registered_contours:
@@ -779,84 +784,87 @@ class GPDataSet(object):
             valid_index = ~np.isin(self.slice_number, redundant_slices)
             self.weights[~valid_index] = 0.0
             self.contour_type[~valid_index] = ContourType.EXCLUDED
+            slices_excluded = np.unique(self.slice_number[~valid_index])
+            for s in slices_excluded:
+                logger.info(f"Excluding unintersected slice {s}")
         else:
             valid_index = np.ones(self.slice_number.shape, dtype=bool)
 
         return redundant_slices, valid_index
 
-    def get_unintersected_slices(self):
-        ## find redundant slices. by Lee
+    # def get_unintersected_slices(self):
+    #     ## find redundant slices. by Lee
 
-        lax_registered_contours = [
-            ContourType.LAX_LV_ENDOCARDIAL,
-            ContourType.LAX_RV_FREEWALL,
-            ContourType.LAX_RV_SEPTUM,
-            ContourType.LAX_LV_EPICARDIAL,
-        ]
+    #     lax_registered_contours = [
+    #         ContourType.LAX_LV_ENDOCARDIAL,
+    #         ContourType.LAX_RV_FREEWALL,
+    #         ContourType.LAX_RV_SEPTUM,
+    #         ContourType.LAX_LV_EPICARDIAL,
+    #     ]
 
-        np_slices = np.unique(self.slice_number)
+    #     np_slices = np.unique(self.slice_number)
 
-        redundant_slices = []
-        for index, slice_id in enumerate(np_slices):
-            zero_count = 0
-            for c_indx, contour in enumerate(lax_registered_contours):
-                contour_intersect_points = self.get_slice_intersection_points(contour, slice_id)
-                if len(contour_intersect_points) == 0:
-                    zero_count += 1
+    #     redundant_slices = []
+    #     for index, slice_id in enumerate(np_slices):
+    #         zero_count = 0
+    #         for c_indx, contour in enumerate(lax_registered_contours):
+    #             contour_intersect_points = self.get_slice_intersection_points(contour, slice_id)
+    #             if len(contour_intersect_points) == 0:
+    #                 zero_count += 1
 
-            if zero_count == len(lax_registered_contours):  # none of the LAX are intersecting with this SAX
-                redundant_slices.append(slice_id)
+    #         if zero_count == len(lax_registered_contours):  # none of the LAX are intersecting with this SAX
+    #             redundant_slices.append(slice_id)
 
-        if len(self.points_coordinates) == 0:
-            return np.zeros(0), np.zeros(0)
+    #     if len(self.points_coordinates) == 0:
+    #         return np.zeros(0), np.zeros(0)
 
-        valid_index = np.ones(self.contour_type.shape, dtype=bool)
-        for i in redundant_slices:
-            valid_index = valid_index * (self.slice_number != i)
+    #     valid_index = np.ones(self.contour_type.shape, dtype=bool)
+    #     for i in redundant_slices:
+    #         valid_index = valid_index * (self.slice_number != i)
 
-        self.weights[~valid_index] = 0.0
-        self.contour_type[~valid_index] = ContourType.EXCLUDED
+    #     self.weights[~valid_index] = 0.0
+    #     self.contour_type[~valid_index] = ContourType.EXCLUDED
 
-        return redundant_slices, valid_index
+    #     return redundant_slices, valid_index
 
-    def get_unintersected_slices_RV(self):
-        ## find redundant slices. by Lee
+    # def get_unintersected_slices_RV(self):
+    #     ## find redundant slices. by Lee
 
-        sax_registered_contours = [
-            ContourType.SAX_RV_FREEWALL,
-            ContourType.SAX_RV_SEPTUM,
-            ContourType.SAX_RV_OUTLET,
-        ]
+    #     sax_registered_contours = [
+    #         ContourType.SAX_RV_FREEWALL,
+    #         ContourType.SAX_RV_SEPTUM,
+    #         ContourType.SAX_RV_OUTLET,
+    #     ]
 
-        lax_registered_contours = ContourType.LAX_RV_SEPTUM
+    #     lax_registered_contours = ContourType.LAX_RV_SEPTUM
 
-        np_slices = np.unique(self.slice_number)
-        redundant_slices = []
-        for index, id in enumerate(np_slices):
-            contour_intersect_points = self.get_slice_intersection_points(lax_registered_contours, id)
-            if len(contour_intersect_points) == 0:
-                redundant_slices.append(id)
+    #     np_slices = np.unique(self.slice_number)
+    #     redundant_slices = []
+    #     for index, id in enumerate(np_slices):
+    #         contour_intersect_points = self.get_slice_intersection_points(lax_registered_contours, id)
+    #         if len(contour_intersect_points) == 0:
+    #             redundant_slices.append(id)
 
-        if len(self.points_coordinates) == 0:
-            return np.zeros(0), np.zeros(0)
+    #     if len(self.points_coordinates) == 0:
+    #         return np.zeros(0), np.zeros(0)
 
-        invalid_index = np.ones(self.contour_type.shape, dtype=bool)
-        for i in redundant_slices:
-            for c_indx, contour in enumerate(sax_registered_contours):
-                invalid_index = (
-                        invalid_index
-                        * (self.contour_type == contour)
-                        * (self.slice_number == i)
-                )
-        valid_index = ~invalid_index
+    #     invalid_index = np.ones(self.contour_type.shape, dtype=bool)
+    #     for i in redundant_slices:
+    #         for c_indx, contour in enumerate(sax_registered_contours):
+    #             invalid_index = (
+    #                     invalid_index
+    #                     * (self.contour_type == contour)
+    #                     * (self.slice_number == i)
+    #             )
+    #     valid_index = ~invalid_index
 
-        # remove unintersected sax slices (based on LAX contours),
-        self.points_coordinates = self.points_coordinates[valid_index]
-        self.contour_type = self.contour_type[valid_index]
-        self.slice_number = self.slice_number[valid_index]
-        self.weights = self.weights[valid_index]
+    #     # remove unintersected sax slices (based on LAX contours),
+    #     self.points_coordinates = self.points_coordinates[valid_index]
+    #     self.contour_type = self.contour_type[valid_index]
+    #     self.slice_number = self.slice_number[valid_index]
+    #     self.weights = self.weights[valid_index]
 
-        return redundant_slices, valid_index
+    #     return redundant_slices, valid_index
 
     # @profile
     def _get_slice_shift_sinclair(self, slice_number, iter, fix_LAX=False):
@@ -983,26 +991,26 @@ class GPDataSet(object):
             j_valid_index = (self.contour_type == contour) & (self.slice_number == j)
 
             if np.sum(j_valid_index) > 2:
-                lv_epi = self.points_coordinates[j_valid_index, :]
-                _, lv_epi = tools.sort_consecutive_points(lv_epi)
+                pts = self.points_coordinates[j_valid_index, :]
+                _, pts = tools.sort_consecutive_points(pts)
             else:
                 continue
 
-            for o in range(len(lv_epi) - 1):
-                # some contour are not closed contours like ethe free wall
-                # therefore if the points are too fat we need to exclude them
+            for o in range(len(pts) - 1):
+                # some contour are not closed contours like the free wall
+                # therefore if the points are too far apart we need to exclude them
                 P = []
-                if np.linalg.norm(lv_epi[o + 1] - lv_epi[o - 1]) < 10:
+                if np.linalg.norm(pts[o + 1] - pts[o - 1]) < 10:
                     P = tools.LineIntersection(
                         self.slices[slice_number].position,
                         self.slices[slice_number].orientation,
-                        lv_epi[o, :],
-                        lv_epi[o + 1, :],
+                        pts[o, :],
+                        pts[o + 1, :],
                     )
 
                 # check the condition to have an intersection + the
                 # intersection point is in between the two defined points
-                if (len(P) > 0 and np.dot(P.T - lv_epi[o, :], P.T - lv_epi[o + 1, :]) < 0):
+                if (len(P) > 0 and np.dot(P.T - pts[o, :], P.T - pts[o + 1, :]) < 0):
                     intersection_points = np.vstack((intersection_points, P))
 
         return intersection_points
