@@ -83,9 +83,10 @@ def run_fitting(case, config, mylogger):
                                         diagnose=True)
             
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
+        start_time = time.time()
         residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=config["input_fitting"]["gp_suffix"], si_suffix=config["input_fitting"]["si_suffix"],
                         workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
-        
+        mylogger.info(f"Fitting models for case {os.path.basename(case)} took: {time.time() - start_time:.2f} seconds")
         mylogger.info(f"Average residuals: {residuals} for case {os.path.basename(case)}")
 
         if config["logging"]["generate_log_file"]:

@@ -160,14 +160,16 @@ def gp_rv_valve_generator(gp_dataset, config, logger, rv_thickness=3):
 
 
 def set_default_weights(data_set):
-    data_set.weights[data_set.contour_type == ContourType.MITRAL_PHANTOM] = 2
+    data_set.weights[data_set.contour_type == ContourType.MITRAL_PHANTOM] = 1
     data_set.weights[data_set.contour_type == ContourType.AORTA_PHANTOM] = 1
     data_set.weights[data_set.contour_type == ContourType.PULMONARY_PHANTOM] = 1
     data_set.weights[data_set.contour_type == ContourType.TRICUSPID_PHANTOM] = 1
 
     data_set.weights[data_set.contour_type == ContourType.APEX_POINT] = 1
-    data_set.weights[data_set.contour_type == ContourType.RV_INSERT] = 1
+    data_set.weights[data_set.contour_type == ContourType.RV_INSERT] = 2
 
     data_set.weights[data_set.contour_type == ContourType.MITRAL_VALVE] = 1
     data_set.weights[data_set.contour_type == ContourType.AORTA_VALVE] = 1
     data_set.weights[data_set.contour_type == ContourType.PULMONARY_VALVE] = 1
+    data_set.weights[data_set.contour_type == ContourType.TRICUSPID_VALVE] = 1
+
