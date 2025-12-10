@@ -1076,17 +1076,22 @@ class GPDataSet(object):
             # 3D -> 2D via inverse affine
             # tools.apply_affine_to_points expects (N,3); returns (N,3). We only need first 2 cols.
             P2D = tools.apply_affine_to_points(np.linalg.inv(T), pts3)[:, :2]
+            sl2D = tools.apply_affine_to_points(np.linalg.inv(T), np.array(sl.position).reshape(1, 3))[:, :2] # also transform slice position for consistency
 
             # In-place 2D shift
             # Ensure trans2d is shape (2,) or (1,2) so broadcasting is cheap
             P2D += trans2d
+            sl2D += trans2d 
 
             # Back to 3D: reuse buffer, avoid zeros allocation with column_stack (cheap view-like join)
             P3_temp = np.column_stack((P2D, np.zeros((P2D.shape[0],), dtype=P2D.dtype)))
+            sl3_temp = np.column_stack((sl2D, np.zeros((sl2D.shape[0],), dtype=sl2D.dtype)))
 
             # 2D→3D via forward affine, then write back in-place
             pts3_new = tools.apply_affine_to_points(T, P3_temp)
+            sl_pos_new = tools.apply_affine_to_points(T, sl3_temp)
             points[mask, :] = pts3_new
+            self.slices[uid].position = sl_pos_new.flatten().tolist()  # update slice position too
 
     def apply_slice_shift(self, slices_translation, position, slice_uids=None):
         """This function applies 2D translations from breath-hold
@@ -1349,3 +1354,52 @@ class GPDataSet(object):
 
     def get_frame_num(self) -> int:
         return self.time_frame
+    
+    def write_gpfile(self, file_name, time_frame=None, overwrite=True):
+        """
+        Author: Laura Dal Toso
+        Date: 22/07/2022
+        -----------------------------
+        Write GPFiles from GPDataset structures that contain 1 frame.
+        Input:
+        - file_name = name of the output GPFile
+        - time_frame to write
+
+        """
+        header = False
+        if overwrite and os.path.exists(file_name):
+            if os.path.exists(file_name):
+                os.remove(file_name)
+                header = True
+        elif not os.path.exists(file_name):
+            header = True
+
+        out = open(file_name, "a")
+        if header:
+            out.write('x\ty\tz\tcontour type\tsliceID\tweight\ttime frame\n')
+        for i, coord in enumerate(self.points_coordinates):
+            out.write('{:.5f}\t{:.5f}\t{:.5f}\t{}\t{}\t{}\t{}\n'.format(coord[0], coord[1], coord[2], str(self.contour_type[i])[12:], self.slice_number[i], self.weights[i], time_frame))
+
+    def write_sliceinfofile(self, file_name, overwrite=True):
+        if overwrite and os.path.exists(file_name):
+            os.remove(file_name)
+        elif os.path.exists(file_name):
+            return
+
+        out = open(file_name, "a")
+        for slice_id, slice in self.slices.items():
+            imagePositionPatient = slice.position
+            imageOrientationPatient = slice.orientation
+            pixelSpacing = slice.pixel_spacing
+            file = "no_file_name"
+            
+            out.write('{}\t'.format(file))
+            out.write('sliceID: \t')
+            out.write('{}\t'.format(slice_id))
+            out.write('ImagePositionPatient\t')
+            out.write('{}\t{}\t{}\t'.format(imagePositionPatient[0], imagePositionPatient[1], imagePositionPatient[2]))
+            out.write('ImageOrientationPatient\t')
+            out.write('{}\t{}\t{}\t{}\t{}\t{}\t'.format(imageOrientationPatient[0], imageOrientationPatient[1], imageOrientationPatient[2],
+                                                imageOrientationPatient[3], imageOrientationPatient[4], imageOrientationPatient[5]))
+            out.write('PixelSpacing\t')
+            out.write('{}\t{}\n'.format(pixelSpacing[0], pixelSpacing[1]))

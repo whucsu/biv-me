@@ -102,17 +102,6 @@ def perform_preprocessing(case, config, mylogger):
     export_guidepoints(dst, output, slice_dict, config["contouring"]["smooth_landmarks"])
     mylogger.success(f'Guide points exported successfully.')
 
-    ## Step 5: Generate HTML (optional) of guide points for visualisation
-    if config["plotting"]["generate_plots_preprocessing"]:
-        if config["plotting"]["include_images"]:
-            image_path = os.path.join(dst, 'images')  # Path to the image file for plotting
-        else:
-            image_path = None
-
-        generate_html(output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path)
-
-        mylogger.success(f'Guidepoints plotted at {os.path.join(plotting,case,"html")}.')
-
     if config["logging"]["generate_log_file"]:
         mylogger.remove(logger_id)
         # Copy log file to states directory

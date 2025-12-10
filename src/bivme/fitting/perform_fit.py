@@ -118,6 +118,11 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         write_all_biv_models(config, model_dict, output_format, output_folder, case_name, logger)
         logger.info(f"[CHECKPOINT][WRITE] Writing out biv models to disk took: {time.time() - start_time}s")
 
+        # Write GP files for plotting
+        my_logger.info(f"Writing out guide point files...")
+        write_all_gpfiles(gp_dataset_list, output_folder, case_name, logger)
+        logger.info(f"[CHECKPOINT][WRITE] Writing out GP files to disk took: {time.time() - start_time}s")
+
         return total_residual / len(frames_to_fit)
 
     except KeyboardInterrupt:
@@ -243,3 +248,25 @@ def write_all_biv_models(config, model_dict, output_format, output_folder, case_
                     vertices, faces_mapped = get_verts_faces_control(biv_model, value)
                     mesh_filename = f"{case_name}_{key}_{phase:03}_control_mesh{output_format}"
                     export_mesh(output_format, output_folder, mesh_filename, vertices, faces_mapped, logger)
+
+def write_all_gpfiles(gpdataset_list, output_folder, case_name, logger):
+    mdata_saved = False
+    for data_set in gpdataset_list:
+        if data_set is None:
+            continue
+
+        gpfile_folder = Path(output_folder) / "gpfiles"
+        gpfile_folder.mkdir(parents=True, exist_ok=True)
+
+        # Write slice info file (only once)
+        if not mdata_saved:
+            metadata_filename = gpfile_folder / f"{case_name}_SliceInfoFile.txt"
+            data_set.write_sliceinfofile(str(metadata_filename))
+            logger.success(f"{os.path.basename(metadata_filename)} successfully saved to {metadata_filename}")
+            mdata_saved = True
+
+        # Write GP file
+        frame_num = data_set.get_frame_num()
+        gpfile_name = gpfile_folder / f"{case_name}_GPFile_{frame_num:03}.txt"
+        data_set.write_gpfile(str(gpfile_name), int(frame_num))
+        logger.success(f"{os.path.basename(gpfile_name)} successfully saved to {gpfile_name}")

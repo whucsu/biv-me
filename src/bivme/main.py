@@ -9,6 +9,7 @@ from loguru import logger
 
 from bivme.preprocessing.dicom.run_preprocessing_pipeline import perform_preprocessing
 from bivme.fitting.perform_fit import perform_fitting
+from bivme.plotting.plot_guidepoints import generate_html
 
 def validate_config_preprocessing(config, mylogger):
     assert os.path.exists(config["input_pp"]["source"]), \
@@ -66,6 +67,23 @@ def validate_config_fitting(config, mylogger):
 def run_preprocessing(case, config, mylogger):
     try:
         perform_preprocessing(case, config, mylogger)
+
+        if config["plotting"]["generate_plots_preprocessing"]:
+            start_time = time.time()
+            output = os.path.join(config["output_pp"]["output_directory"], config["input_pp"]["batch_ID"], case)  # output directory for guidepoints
+            plotting = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"]) # save the plotted htmls in processed directory
+
+            if config["plotting"]["include_images"]:
+                dst = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case)  # processed directory
+                image_path = os.path.join(dst, 'images')  # Path to the image file for plotting
+            else:
+                image_path = None
+
+            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path)
+
+            mylogger.info(f'Generated html plots (preprocessing) at {os.path.join(plotting,case,"html")}.')
+            mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
+
     except KeyboardInterrupt:
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
@@ -84,12 +102,31 @@ def run_fitting(case, config, mylogger):
                                         diagnose=True)
             
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
+        gp_suffix = config["input_fitting"]["gp_suffix"]
+        si_suffix = config["input_fitting"]["si_suffix"]
         start_time = time.time()
-        residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=config["input_fitting"]["gp_suffix"], si_suffix=config["input_fitting"]["si_suffix"],
+        residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=gp_suffix, si_suffix=si_suffix,
                         workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
         mylogger.info(f"Fitting models for case {os.path.basename(case)} took: {time.time() - start_time:.2f} seconds")
         mylogger.info(f"Average residuals: {residuals} for case {os.path.basename(case)}")
 
+        if config["plotting"]["generate_plots_fitting"]:
+            start_time = time.time()
+            gp_dir = os.path.join(config["output_fitting"]["output_directory"], case, "gpfiles") # directory where the guidepoints are saved after fitting
+            model_dir = os.path.join(config["output_fitting"]["output_directory"], case) # directory where the fitted models are saved
+            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot
+
+            if config["plotting"]["include_images"]:
+                image_path = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case, "images")
+            else:
+                image_path = None
+
+            generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path)
+            
+            mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
+            mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
+            
         if config["logging"]["generate_log_file"]:
             mylogger.remove(logger_id)
 
