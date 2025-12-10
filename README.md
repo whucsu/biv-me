@@ -380,14 +380,9 @@ usage: detect_intersection.py [-h] [-config CONFIG_FILE]
 | **Argument**          | **Description**                                                                               |
 | --------------------- | --------------------------------------------------------------------------------------------- 
 | `-h, --help`          | Displays the help message and exits.                                                          |
-| `-mdir MODEL_DIR`     | Specifies the path to the directory containing the biv-me models.                      |
-| `-o OUTPUT_PATH`      | Specifies the directory where the output files will be saved.                                 |
-| `-b BIV_MODEL_FOLDER` | Path to the folder containing the subdivision matrices for the models (default: `src/model`). |
-| `-pat PATTERNS`       | The folder pattern to include for processing. You can use wildcards (default: `*`).           |
-| `-r VOXEL_RESOLUTION`        | Voxel resolution to compute the masks.                                        |
-| `-s SAVE_SEGMENTATION_FLAG` | Boolean flag indicating whether to save 3D masks
+| `-config CONFIG_FILE`     | Path to config file describing which modules to run and their associated parameters.                   
 
-The config file should be the one used to fit the original models. Refitted models will be saved in config["output_fitting"]["output_directory"]/corrected_models.
+The config file should be the one used to fit the original models. Refitted models will be saved in config["output_fitting"]["output_directory"].
 
 ## FAQs
 ### *How often will the deep learning models be updated?*

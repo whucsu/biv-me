@@ -95,17 +95,19 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
                     continue
                 num = data_set.get_frame_num()
                 try:
-                    
                     biv_model, residual = fut.result()
                     model_dict[num] = biv_model
                     total_residual += residual  # will raise if the worker threw
                 except Exception as e:
                     errors[num] = e
 
+        logger.info(f"[CHECKPOINT][BIV] Fit model for phase {num}")
+        logger.info(f"[CHECKPOINT][RES] Residual: {residual}")
+
         # Handle any accumulated errors (only called at end)
         if errors:
             # Try to throw a summarized error
-            msg = "Some frames failed: " + ", ".join(f"{k}: {type(v).__name__}" for k, v in errors.items())
+            msg = "Some frames failed: " + ", ".join(f"{int(k):03d}: {type(v).__name__}" for k, v in errors.items())
             logger.error(msg)
         logger.info(f"[CHECKPOINT][FIT] Fitting models took: {time.time() - start_time}s")
 
@@ -183,11 +185,10 @@ def _fit_one_frame(config, data_set, aligned_biv_model):
     # Perform linear fit
     biv_model = aligned_biv_model.copy()
     lsq_trans_weight = 0.001  # TODO: Make a config parameter
-    solve_least_squares_problem(biv_model, gp_weight, data_set, lsq_trans_weight, logger)
+    solve_least_squares_problem(biv_model, gp_weight, data_set, lsq_trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
 
     ## Perform diffeomorphic fit
-    residual = solve_convex_fast(biv_model, data_set, gp_weight, conv_weight, trans_weight, logger)
-    logger.info(f"[CHECKPOINT][BIV] Fit model for phase {data_set.get_frame_num()}")
+    residual = solve_convex_fast(biv_model, data_set, gp_weight, conv_weight, trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
 
     return biv_model, residual
 

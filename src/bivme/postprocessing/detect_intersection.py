@@ -5,7 +5,6 @@ from pathlib import Path
 import re
 import fnmatch
 from copy import deepcopy
-from plotly.offline import plot
 
 from bivme import MODEL_RESOURCE_DIR
 from bivme.fitting.BiventricularModel import BiventricularModel
@@ -52,10 +51,12 @@ def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, outp
     current_collision = fitted_model.detect_collision()
     inter = current_collision.difference(fitted_model.reference_collision) 
 
+    frame_num = int(os.path.basename(os.path.normpath(model_file)).split('_')[-1].replace('.txt',''))
+
     if bool(inter):
         
         logger.warning(f"Intersections detected for case {os.path.basename(os.path.normpath(model_file))}")        
-        logger.info(f"Refitting of {str(case_name)}")
+        logger.info(f"Refitting of frame {frame_num:03d}")
 
         # create a separate output folder for each patient
         output_folder = Path(output_folder) / os.path.basename(case_name)
@@ -100,12 +101,12 @@ def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, outp
         solve_least_squares_problem(biv_model, gp_weight, gp_dataset, lsq_trans_weight, collision_detection=True, model_prior = fitted_model, my_logger=logger)
   
         ## Perform diffeomorphic fit
-        residuals = solve_convex_fast(biv_model, gp_weight, conv_weight, trans_weight, collision_detection=True, model_prior = fitted_model, my_logger=logger)
+        residuals = solve_convex_fast(biv_model, gp_dataset, gp_weight, conv_weight, trans_weight, collision_detection=True, model_prior = fitted_model, my_logger=logger)
 
         return biv_model, residuals
 
     else:
-        logger.success(f"No intersection detected for {case_name} - moving on")
+        logger.success(f"No intersection detected for frame {frame_num:03d} - moving on")
         return None
 
 
@@ -126,45 +127,65 @@ if __name__ == "__main__":
     # TOML Schema Validation
     match config:
         case {
-            "input": {"gp_directory": str(),
-                      "gp_suffix": str(),
-                      "si_suffix": str(),
-                      },
+            "modules": {"preprocessing": bool(), "fitting": bool()},
+
+            "logging": {"show_detailed_logging": bool(), "generate_log_file": bool()},
+
+            "plotting": {"generate_plots_preprocessing": bool(), "generate_plots_fitting": bool(), "include_images": bool(), "export_images": bool()},
+
+            "input_pp": {"source": str(),
+                        "batch_ID": str(),
+                        "analyst_id": str(),
+                        "processing": str(),
+                        "states": str()
+                        },
+            "view-selection": {"option": str(), "correct_mode": str()},
+            "contouring": {"smooth_landmarks": bool()},
+            "output_pp": {"overwrite": bool(), "output_directory": str()},
+
+            "input_fitting": {"gp_directory": str(),
+                        "gp_suffix": str(),
+                        "si_suffix": str(),
+                        },
             "breathhold_correction": {"shifting": str(), "ed_frame": int()},
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
             "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float()},
-            "output": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),  "show_logging": bool(), "export_control_mesh": bool(), "mesh_format": str(), "generate_log_file": bool(), "overwrite": bool()},
+            "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass
         case _:
             raise ValueError(f"Invalid configuration: {config}")
 
-
-    if not config["output"]["show_logging"]:
+    if not config["logging"]["show_detailed_logging"]:
         logger.remove()
 
     log_level = "DEBUG"
     log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
 
-    if not (config["output"]["mesh_format"].endswith('.obj') or config["output"]["mesh_format"].endswith('.vtk') or config["output"]["mesh_format"] == "none"):
-        logger.error(f'argument mesh_format must be .obj or .vtk. {config["output"]["mesh_format"]} given.')
+    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == "none"):
+        logger.error(f'argument mesh_format must be .obj or .vtk. {config["output_fitting"]["mesh_format"]} given.')
         sys.exit(0)
 
-    for mesh in config["output"]["output_meshes"]:
+    for mesh in config["output_fitting"]["output_meshes"]:
         if mesh not in ["LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"]:
             logger.error(f'argument output_meshes invalid. {mesh} given. Allowed values are "LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"')
             sys.exit(0)
 
     # save config file to the output folder
-    output_folder = Path(config["output"]["output_directory"]) # Save in place
-    output_folder.mkdir(parents=True, exist_ok=True)
-    shutil.copy(args.config_file, output_folder)
+    output_folder = Path(config["output_fitting"]["output_directory"]) # Save in place
+    if not os.path.exists(output_folder):
+        logger.warning(f"Output folder {output_folder} does not exist. Exiting.")
+        sys.exit(0)
 
-    case_list = os.listdir(config["output"]["output_directory"])
-    folders = [Path(config["output"]["output_directory"], case).as_posix() for case in case_list]
+    case_list = [f for f in os.listdir(output_folder) if os.path.isdir(os.path.join(output_folder,f))]
+    folders = [Path(config["output_fitting"]["output_directory"], case).as_posix() for case in case_list]
 
     logger.info(f"Found {len(folders)} model folders.")
+
+    if len(folders) == 0:
+        logger.warning(f"No model folders found in {config['output_fitting']['output_directory']}. Exiting")
+        sys.exit(0)
 
     try:
         for i, folder in enumerate(folders):
@@ -191,6 +212,8 @@ if __name__ == "__main__":
                 # Export corrected models
                 if len(model_dict) > 0:
                     write_all_biv_models(config, model_dict, config["output_fitting"]["mesh_format"], output_folder / case_name, case_name, logger)
+                else:
+                    logger.info(f"No intersections detected for case {case_name}. No refitting performed.")
 
         logger.success(f"Done. Results are saved in {output_folder}")
     except KeyboardInterrupt:

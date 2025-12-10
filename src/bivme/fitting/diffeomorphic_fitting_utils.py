@@ -158,8 +158,10 @@ def solve_least_squares_problem(biv_model: BiventricularModel,
         if biv_model.is_diffeomorphic(mesh_try, min_jacobian):
             update_mesh = True
             if collision_detection:
-                current_collision = mesh_try.detect_collision()
-                inter = current_collision.difference(mesh_try.reference_collision) 
+                updated_model = biv_model.copy()
+                updated_model.update_control_mesh(mesh_try)
+                current_collision = updated_model.detect_collision()
+                inter = current_collision.difference(updated_model.reference_collision) 
                 if bool(inter):
                     # if there is a collision detected, we update the prior to the current RV shape and keep doing the fitting to get a closer LV shape to the original
                     # update prior

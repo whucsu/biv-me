@@ -115,8 +115,10 @@ class ExplicitFitterNumpy:
 
             if self.collision_detection:
                 # Collision detection check
-                current_collision = M_try.detect_collision()
-                inter = current_collision.difference(M_try.reference_collision) 
+                updated_model = self.biv_model.copy()
+                updated_model.update_control_mesh(M_try)
+                current_collision = updated_model.detect_collision()
+                inter = current_collision.difference(updated_model.reference_collision) 
                 if bool(inter):
                     self.logger.info(f" Iteration {k}: Collision detected, updating prior model and refitting...")
                     for surface in [Surface.RV_SEPTUM, Surface.RV_FREEWALL, Surface.RV_INSERT]:
