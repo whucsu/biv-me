@@ -94,7 +94,7 @@ def fix_intersection(case_name: str, config: dict, model_file: os.PathLike, outp
         gp_weight = config["fitting_weights"]["guide_points"]
         conv_weight = config["fitting_weights"]["convex_problem"]
         trans_weight = config["fitting_weights"]["transmural"]
-        lsq_trans_weight = 0.001
+        lsq_trans_weight = config["fitting_weights"]["lsq_trans_weight"]
 
         # Perform least squares fit
         biv_model = reference_biventricular_model.copy()
@@ -150,7 +150,7 @@ if __name__ == "__main__":
             "breathhold_correction": {"shifting": str(), "ed_frame": int()},
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
-            "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float()},
+            "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float(), "lsq_trans_weight": float()},
             "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass

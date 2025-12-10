@@ -1,6 +1,6 @@
 
 title = "Configuration file for biv-me"
-version = "1.1.7" # for semantic versioning - Major.Minor.Patch sequence
+version = "1.2.0" # for semantic versioning - Major.Minor.Patch sequence
 # e.g software version 2.3.1 means that the software is in its second major version,
 # with three additional functionalities added, and one patch fix implemented.
 # When a developer fixes a bug in that version, the next version release is named version 2.3.2.
@@ -189,8 +189,16 @@ num_of_phantom_points_av = 20
 
 [fitting_weights]
 guide_points = 100.0
+# Default: 100.0
+
 convex_problem = 1e6
+# Default: 1e6
+
 transmural = 0.01
+# Default: 0.01
+
+lsq_trans_weight = 0.001
+# Default: 0.001
 
 [output_fitting]
 export_control_mesh = false

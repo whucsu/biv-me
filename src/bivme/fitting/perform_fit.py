@@ -181,10 +181,10 @@ def _fit_one_frame(config, data_set, aligned_biv_model):
     gp_weight = config["fitting_weights"]["guide_points"]
     conv_weight = config["fitting_weights"]["convex_problem"]
     trans_weight = config["fitting_weights"]["transmural"]
+    lsq_trans_weight = config["fitting_weights"]["lsq_trans_weight"]
 
     # Perform linear fit
     biv_model = aligned_biv_model.copy()
-    lsq_trans_weight = 0.001  # TODO: Make a config parameter
     solve_least_squares_problem(biv_model, gp_weight, data_set, lsq_trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
 
     ## Perform diffeomorphic fit
