@@ -49,7 +49,7 @@ def test_init_build_mode(test_build_input, expected_build):
     assert model.mbder_dz.shape == (model.NUM_GAUSSIAN_POINTS, model.NUM_NODES)
 
     if expected_build:
-        assert model.fraction.shape == (model.NUM_SURFACE_NODES, 1)
+        assert model.fraction.shape == (model.NUM_SURFACE_NODES,)
         assert model.control_et_indices.shape == (model.NUM_ELEMENTS, 8)
         assert model.et_vertex_xi.shape == (model.NUM_SURFACE_NODES, 3)
         assert model.b_spline.shape == (model.NUM_SURFACE_NODES, 16)

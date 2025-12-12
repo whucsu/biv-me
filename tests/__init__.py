@@ -1,1 +1,1 @@
-CURRENT_RESIDUALS = {"patient_1_gpdata" : 1.69, "patient_2_gpdata" : 1.33}
+CURRENT_RESIDUALS = {"patient_1_gpdata" : 3.74, "patient_2_gpdata" : 2.25}
