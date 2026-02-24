@@ -1,77 +1,46 @@
-from stl import mesh as stl_mesh
+from pathlib import Path
+
 import numpy as np
-import pyvista as pv
 import os
-def export_to_stl(file_name,vertices, faces):
-    # Create the mesh
-    if '.stl' not in os.path.basename(file_name):
-        ValueError(' filenma should include .stl extension')
-    model_mesh = stl_mesh.Mesh(np.zeros(faces.shape[0], dtype=stl_mesh.Mesh.dtype))
-    for i, f in enumerate(faces):
-        for j in range(3):
-            model_mesh.vectors[i][j] = vertices[int(f[j]), :]
-
-    # Write the mesh to file
-    model_mesh.save(file_name)
-
-def export_points_to_cont6(filename,points,materials = None, scale = 1):
-    # %% Write Nodes list in Continuity format
-    print('Writing nodes form {0}'.format(filename))
-    f = open(filename, 'w+')
-    # Write headers
-    node_string = 'Coords_1_val\tCoords_2_val\tCoords_3_val\tLabel\tNodes\n'
-    # Write nodes
-    for i,node in enumerate(points):
-        for coord in node:
-            node_string += '%f\t' % (coord*scale)
-        node_string += '%i\t%i\n' % (materials[i], i + 1)
-    f.write(node_string)
-    f.close()
-
-def export_elem_to_cont6(filename, elements, materials=None):
-    # %% Write elements list in Continuity format
-    print('Writing elements form {0}'.format(filename))
-    f = open(filename+'.txt', 'w+')
-    # Write headers
-    elem_string = 'Node_0_Val\tNode_1_Val\tNode_2_Val\tLabel\tElement\n'
-
-
-    for indx, elem in enumerate(elements):
-        for node_id in elem:
-            elem_string += '%i\t' % node_id
-        elem_string += '%i\t%i\n' % (materials[indx], indx + 1)
-    f.write(elem_string)
-    f.close()
-
-def export_model_to_cont6(self,filename, nodes, elements,
-                          node_materials = None,
-                          elem_materials = None, scale = 1):
-    filename_nodes = filename + '_nodes'
-    filename_elem = filename + '_elem'
-    self.export_nodes_to_cont6(filename_nodes,nodes, node_materials, scale)
-    self.export_elem_to_cont6(filename_elem, elements, elem_materials, scale)
-    print('Continuity mesh exported')
+import pyvista as pv
 
 def write_vtk_surface(filename: str, vertices: np.ndarray, faces: np.ndarray) -> None:
     """
-    Write a VTK surface mesh.
-
-    Parameters
-    ----------
-    filename : The name of the output VTK file.
-    vertices : An array of shape (N, 3) representing the vertex coordinates.
-    faces : An array of shape (M, 3) representing the triangular faces.
-
-    Returns
-    -------
-    None
+    Write a triangle mesh as legacy VTK PolyData (ASCII).
+    `vertices`: (N,3) float
+    `faces`: (M,3) int, 0-based indexing
     """
+    vertices = np.asarray(vertices, dtype=float)
+    faces = np.asarray(faces, dtype=np.int32)
 
-    if np.__version__ >= '1.20.0': # for compatibility with later versions of numpy
-        np.bool = np.bool_
+    if vertices.ndim != 2 or vertices.shape[1] != 3:
+        raise ValueError("vertices must be (N,3)")
+    if faces.ndim != 2 or faces.shape[1] != 3:
+        raise ValueError("faces must be (M,3) of triangle indices")
+    if np.min(faces) < 0 or np.max(faces) >= len(vertices):
+        raise ValueError("faces contain out-of-range vertex indices")
 
-    mesh = pv.PolyData(vertices, np.c_[np.ones(len(faces)) * 3, faces].astype(int))
-    mesh.save(filename, binary=False)
+    n_pts = vertices.shape[0]
+    n_tri = faces.shape[0]
+
+    with open(filename, "w", newline="\n") as f:
+        # Header
+        f.write("# vtk DataFile Version 4.2\n")
+        f.write("Triangle mesh\n")
+        f.write("ASCII\n")
+        f.write("DATASET POLYDATA\n")
+
+        # Points
+        f.write(f"POINTS {n_pts} float\n")
+        for v in vertices:
+            # Match your OBJ precision style; tweak if you want more decimals
+            f.write(f"{v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
+
+        # Triangles as POLYGONS: line format is "3 i j k"
+        # Second integer is the total number of integers following: n_tri * (3+1)
+        f.write(f"POLYGONS {n_tri} {n_tri * 4}\n")
+        for tri in faces:
+            f.write(f"3 {int(tri[0])} {int(tri[1])} {int(tri[2])}\n")
 
 def write_colored_vtk_surface(filename: str, vertices: np.ndarray, faces: np.ndarray, colormat: np.ndarray) -> None:
     """
@@ -96,15 +65,34 @@ def write_colored_vtk_surface(filename: str, vertices: np.ndarray, faces: np.nda
     mesh.save(filename, binary=False)
 
 def export_to_obj(file_name: os.PathLike, vertices: np.ndarray, faces: np.ndarray) -> None:
-    if '.obj' not in os.path.basename(file_name):
-        ValueError(' filenma should include .obj extension')
+    file_name = str(file_name)
+    if not os.path.basename(file_name).lower().endswith(".obj"):
+        raise ValueError("filename should include .obj extension")
 
-    with open(file_name, 'w') as f:
+    vertices = np.asarray(vertices, dtype=float)
+    faces = np.asarray(faces, dtype=np.int32)
+
+    with open(file_name, 'w', newline="\n") as f:
         f.write("# OBJ file\n")
         for v in vertices:
             f.write("v %.4f %.4f %.4f\n" % (v[0], v[1], v[2]))
+        # OBJ is 1-based indexing
         for p in faces:
-            f.write("f")
-            for i in p:
-                f.write(" %d" % (i + 1))
-            f.write("\n")
+            f.write("f %d %d %d\n" % (p[0] + 1, p[1] + 1, p[2] + 1))
+
+def export_mesh(output_format, output_dir, filename, vertices, faces, logger):
+    writers = {
+        ".vtk": ("vtk", write_vtk_surface),
+        ".obj": ("obj", export_to_obj),
+    }
+
+    if output_format in writers:
+        folder_name, writer_func = writers[output_format]
+        output_folder_fmt = Path(output_dir, folder_name)
+        output_folder_fmt.mkdir(exist_ok=True)
+        mesh_path = output_folder_fmt / filename
+
+        writer_func(str(mesh_path), vertices, faces)
+        logger.success(f"{filename} successfully saved to {output_folder_fmt}")
+    else:
+        logger.error("argument format must be .obj or .vtk")

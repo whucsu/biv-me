@@ -1,257 +1,175 @@
 import numpy as np
+from copy import deepcopy
+from pathlib import Path
 
-def generate_gauss_points(nb_points):
-    '''
-    Estimte gauss points and weight for x, y and z direction assuming
-    interval(a,b) = [0,1]
+from bivme.fitting.GPDataSet import GPDataSet
+from bivme.fitting.surface_enum import ContourType
 
-    Parameters:
-    ----------
-
-    'nb_points' order of point scheme to be used
-
-    Returns:
-    -------
-
-    `weights`  vector of gauss weights
-
-    `points`  vector of gauss points
-    '''
-# cf Alistair's code
-
-    nx=nb_points
-    ny=nb_points
-    nz=nb_points
-
-    # set limits
-    ax=0
-    bx=1
-    ay=0
-    by=1
-    az=0
-    bz=1
-
-    # get gauss points in x direction through the functions points_weights
-    xgauss_weights, xgauss_points = gauss_points_weights(nx)
-    # obtain actual values of the gauss points and weights
-    xpoints=(bx-ax)*0.5*xgauss_points+(bx+ax)*0.5
-    xweights=(bx-ax)*0.5*xgauss_weights
-
-    # get y points in y direction through the functions points_weights
-    ygauss_weights, ygauss_points =gauss_points_weights(ny)
-
-    # obtain actual values of the gauss points and weights
-    ypoints=(by-ay)*0.5*ygauss_points+(by+ay)*0.5
-    yweights=(by-ay)*0.5*ygauss_weights
-
-    # get z points in z direction through the functions points_weights
-    zgauss_weights, zgauss_points =gauss_points_weights(nz)
-
-    # obtain actual values of the gauss points and weights
-    zpoints=(bz-az)*0.5*zgauss_points+(bz+az)*0.5
-    zweights=(bz-az)*0.5*zgauss_weights
-
-    xi = np.zeros((nx*ny*nz,3))
-    weights = np.zeros(nx*ny*nz)
-    count = 0
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                # position of approximating points xi[xs ys], nx2
-                xi[count,0] = xpoints[i]
-                xi[count,1] = ypoints[j]
-                xi[count,2] = zpoints[k]
-                weights[count] = xweights[i]*yweights[j]*zweights[k]
-                count=count+1
-    return xi, weights
-
-
-
-def gauss_points_weights(number):
-    ''' Generate gauss point and weights assuming interval[a,b] = [-1,1]
-
-    Parameters:
-    -----------
-
-    `number` order of point scheme to be used
-
-    Returns:
-    --------
-
-    `weights`  vector of gauss weights
-
-    `points`  vector of gauss points
-
-    '''
-
-    zero_tolerance = 1 * 10e-10
-
-    # obtain whether odd or even number of points desired
-    odd_even = number%2
-
-    if (odd_even == 1):
-        loop = number - 1
-    else:
-        loop = number
-
-    eta =np.zeros(int(loop / 2))
-    w = np.zeros(int(loop/2))
-    #loop over half number of points wanted
-    for j  in range(int(loop *0.5)):
-    # obtain initial estimate for first root
-        eta[j] = np.cos(np.pi * (j+1 - 0.25) / (number + 0.5))
-    # initialise delta to 1
-        delta = 1
-        while (abs(delta) > zero_tolerance):
-            Pn, dPn = legendreCIM(number, eta[j])
-            delta = -Pn / dPn
-            eta[j] = eta[j] + delta
-        w[j] = 2 / ((1 - eta[j] ** 2) * dPn ** 2)
-
-
-    # record gauss points and weights
-    points= np.zeros(number)
-    weights = np.zeros(number)
-    if (odd_even == 0):
-        for j in range(int(loop *0.5)):
-            points[j] = -eta[j]
-            points[number-1 - j] = eta[j]
-            weights[j] = w[j]
-            weights[number -1 - j] = w[j]
-
-    else:
-        points[int(loop*0.5) ] = 0
-        Pn,dPn = legendreCIM(number, points[int(loop*0.5 )])
-        weights[int(loop*0.5) ] = 2 / ((1 - points[int(loop*0.5) ]**2) * dPn ** 2)
-        for j  in range(int(loop *0.5)):
-            points[j] = -eta[j]
-            points[number-1 - j ] = eta[j]
-            weights[j] = w[j]
-            weights[number-1 - j ] = w[j]
-
-
-    return weights,points
-
-
-
-def legendreCIM(n, eta):
-    '''Evaluates the Legendre polynomial and its derivative
-    at a point eta(ith root)
-
-    Parameters:
-    ------------
-
-    `n` number of roots / degrees of freedom
-
-    `eta` current estimate of the root  i.e gauss  point
-
-    Returns:
-    --------
-
-    `Pn`  value of polynomial at n
-
-    `dPn` derivative of polynomial at n
-    '''
-    P= np.zeros(n+2)
-    P[0] = 0
-    P[1] = 1
-
-    for i in range(1,n+1):
-        P[i + 1] = ((2 * i - 1) * eta * P[i] - (i - 1) * P[i-1]) / i
-
-
-    Pn = P[n+1 ]
-    dPn = n * ((eta * P[n+1] - P[n]) / (eta ** 2 - 1))
-
-    return Pn, dPn
-
-def basis_function_bspline(s):
-    ''' Evaluate the four uniform cubic B-Spline basis functions at a point s
-
-    Parameters:
-    -----------
-
-    `s` float point where to evaluate the b-spline basis
-
-    Returns:
-    --------
-
-    `bs` 4x1 vector b-spline basis functions value
-    '''
-    bs = np.zeros(4)
-    bs[0] = (1/6) * (1-3*s+3*s*s-s*s*s)
-    bs[1] = (1/6) * (4 - 6*s*s+3*s*s*s)
-    bs[2] = (1/6) * (1+3*s+3*s*s-3*s*s*s)
-    bs[3] = (1/6) * s*s*s
-
-    return bs
-
-def der2_basis_function_bspline(s):
-    ''' Evaluate second derivatives of the four uniform cubic  B-Spline
-        basis functions at point s
-
-    Parameters:
-    -----------
-
-    `s` float point where to evaluate the b-spline basis
-
-    Returns:
-    --------
-
-    `ds` 4x1 vector with second derivatives of the b-spline basis functions
-    '''
-
-    ds = np.zeros(4)
-    ds[0] = 1-s
-    ds[1] = 3*s-2
-    ds[2] = 1-3*s
-    ds[3] = s
-    return ds
-
-def der_basis_function_bspline(s):
-    ''' Evaluate derivatives of the four uniform cubic  B-Spline
-        basis functions at point s
-
-    Parameters:
-    -----------
-
-    `s` float point where to evaluate the b-spline basis
-
-    Returns:
-    --------
-
-    `ds` 4x1 vector with derivatives of the b-spline basis functions
-    '''
-    ds = np.zeros(4)
-    ds[0] = -0.5*s*s + s - 0.5
-    ds[1] = 1.5*s*s - 2*s
-    ds[2] = -1.5*s*s + s + 0.5
-    ds[3] = 0.5*s*s
-    return ds
-
-
-def adjust_boundary_weights(boundary, sWeights,tWeights):
-
-    if int(boundary) &  1:
+def adjust_boundary_weights(boundary, sWeights, tWeights):
+    if int(boundary) & 1:
         tWeights[2] = tWeights[2] - tWeights[0]
         tWeights[1] = tWeights[1] + 2 * tWeights[0]
         tWeights[0] = 0
 
-
-    if int(boundary) &  2:
+    if int(boundary) & 2:
         sWeights[1] = sWeights[1] - sWeights[3]
         sWeights[2] = sWeights[2] + 2 * sWeights[3]
         sWeights[3] = 0
 
-    if int(boundary)& 4:
+    if int(boundary) & 4:
         tWeights[1] = tWeights[1] - tWeights[3]
         tWeights[2] = tWeights[2] + 2 * tWeights[3]
         tWeights[3] = 0
 
-
-    if int(boundary) &  8:
+    if int(boundary) & 8:
         sWeights[2] = sWeights[2] - sWeights[0]
         sWeights[1] = sWeights[1] + 2 * sWeights[0]
         sWeights[0] = 0
 
     return sWeights, tWeights
+
+
+def create_ref_dataset(config, folder, output_folder_models, filename_info, case_name, frame_names, logger):
+    # Pull out config params
+    bh_corr_method = config["breathhold_correction"]["shifting"]
+    gp_ds_factor = config["gp_processing"]["sampling"]
+    ed_frame = config["breathhold_correction"]["ed_frame"]
+    logger.info(f'ED set to frame #{ed_frame}')
+
+    # create log files where to store fitting errors and shift
+    shift_file = output_folder_models / f"shift_file.txt"
+    pos_file = output_folder_models / f"pos_file.txt"
+
+    ed_dataset = None
+    shift_to_apply = 0  # 2D translation
+    updated_slice_position = 0
+
+    if bh_corr_method == "derived_from_ed":
+        logger.info("Shift measured only at ED frame")
+        filename = Path(folder) / f"GPFile_{frame_names[ed_frame]:03}.txt"
+
+        if not filename.exists():
+            logger.error(f"Cannot find {filename} file! Skipping this model")
+            return None
+        
+        ed_dataset = GPDataSet(str(filename), str(filename_info), case_name, sampling=gp_ds_factor, frame_num=ed_frame)
+        if not ed_dataset.success:
+            return None
+
+        result_at_ed = ed_dataset.sinclair_slice_shifting(logger)
+        _, _ = ed_dataset.get_unintersected_slices_fast()
+
+        shift_to_apply = result_at_ed[0]
+        updated_slice_position = result_at_ed[1]
+
+        with shift_file.open("w", encoding="utf-8") as file:
+            file.write("shift measured only at ED: frame " + str(ed_frame) + "\n")
+            file.write(str(shift_to_apply))
+            file.close()
+
+        with pos_file.open("w", encoding="utf-8") as file:
+            file.write("pos measured only at ED: frame " + str(ed_frame) + "\n")
+            file.write(str(updated_slice_position))
+            file.close()
+
+    elif bh_corr_method == "average_all_frames":
+        logger.info("Shift measured on all the frames and averaged")
+        counter = 0
+        frames_to_fit = sorted(np.unique(frame_names))  # if you want to fit all _frames#
+        for frame in frames_to_fit:
+            num = int(frame)
+            filename = Path(folder) / f"GPFile_{num:03}.txt"
+            if not filename.exists():
+                logger.error(f"Cannot find {filename} file! Skipping this model")
+                return None
+
+            dataset = GPDataSet(str(filename), str(filename_info), case_name, sampling=gp_ds_factor, frame_num=num)
+
+            if frame == frames_to_fit[ed_frame]:
+                ed_dataset = deepcopy(dataset)
+            if not dataset.success:
+                continue
+            result_at_t = dataset.sinclair_slice_shifting(logger)
+
+            shift_to_apply += result_at_t[0]
+            updated_slice_position += result_at_t[1]
+            counter += 1
+
+        shift_to_apply /= counter
+        updated_slice_position /= counter
+
+        with shift_file.open("w", encoding="utf-8") as file:
+            file.write("Average shift \n")
+            file.write(str(shift_to_apply))
+            file.close()
+
+        with pos_file.open("w", encoding="utf-8") as file:
+            file.write("Average shift \n")
+            file.write(str(updated_slice_position))
+            file.close()
+
+    elif bh_corr_method == "none":
+        logger.info("No correction applied")
+        filename = Path(folder) / f"GPFile_{frame_names[ed_frame]:03}.txt"
+        if not filename.exists():
+            logger.error(f"Cannot find {filename} file! Skipping this model")
+            return None
+
+        ed_dataset = GPDataSet(str(filename), str(filename_info), case_name, sampling=gp_ds_factor, frame_num=ed_frame)
+        if not ed_dataset.success:
+            return None
+
+    else:
+        logger.error(f'Method {bh_corr_method} unavailable.  '
+                     f'Allowed values: none, derived_from_ed or average_all_frame. No correction applied')
+        return None
+
+    return ed_dataset, shift_to_apply, updated_slice_position
+
+
+def gp_rv_valve_generator(gp_dataset, config, logger, rv_thickness=3):
+    any_sax_rv_epi = np.any(gp_dataset.contour_type == ContourType.SAX_RV_EPICARDIAL)
+    any_lax_rv_epi = np.any(gp_dataset.contour_type == ContourType.LAX_RV_EPICARDIAL)
+    if not any_sax_rv_epi and not any_lax_rv_epi:
+        logger.info('Generating RV epicardial points')
+        _, _, _ = gp_dataset.create_rv_epicardium(rv_thickness)
+
+    try:
+        num_mv_phantom_pts = config["gp_processing"]["num_of_phantom_points_mv"]
+        _ = gp_dataset.create_valve_phantom_points(num_mv_phantom_pts, ContourType.MITRAL_VALVE)
+    except:
+        logger.warning('Error in creating mitral phantom points')
+
+    try:
+        num_tv_phantom_pts = config["gp_processing"]["num_of_phantom_points_tv"]
+        _ = gp_dataset.create_valve_phantom_points(num_tv_phantom_pts, ContourType.TRICUSPID_VALVE)
+    except:
+        logger.warning('Error in creating tricuspid phantom points')
+
+    try:
+        num_pv_phantom_pts = config["gp_processing"]["num_of_phantom_points_pv"]
+        _ = gp_dataset.create_valve_phantom_points(num_pv_phantom_pts, ContourType.PULMONARY_VALVE)
+    except:
+        logger.warning('Error in creating pulmonary phantom points')
+
+    try:
+        num_av_phantom_pts = config["gp_processing"]["num_of_phantom_points_av"]
+        _ = gp_dataset.create_valve_phantom_points(num_av_phantom_pts, ContourType.AORTA_VALVE)
+    except:
+        logger.warning('Error in creating aorta phantom points')
+
+
+def set_default_weights(data_set):
+    data_set.weights[data_set.contour_type == ContourType.MITRAL_PHANTOM] = 1
+    data_set.weights[data_set.contour_type == ContourType.AORTA_PHANTOM] = 1
+    data_set.weights[data_set.contour_type == ContourType.PULMONARY_PHANTOM] = 1
+    data_set.weights[data_set.contour_type == ContourType.TRICUSPID_PHANTOM] = 1
+
+    data_set.weights[data_set.contour_type == ContourType.APEX_POINT] = 1
+    data_set.weights[data_set.contour_type == ContourType.RV_INSERT] = 2
+
+    data_set.weights[data_set.contour_type == ContourType.MITRAL_VALVE] = 1
+    data_set.weights[data_set.contour_type == ContourType.AORTA_VALVE] = 1
+    data_set.weights[data_set.contour_type == ContourType.PULMONARY_VALVE] = 1
+    data_set.weights[data_set.contour_type == ContourType.TRICUSPID_VALVE] = 1
+

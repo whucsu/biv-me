@@ -4,16 +4,86 @@ import shutil
 import argparse
 import tomli
 import datetime
+import time
 from loguru import logger
 
 from bivme.preprocessing.dicom.run_preprocessing_pipeline import perform_preprocessing
-from bivme.preprocessing.dicom.run_preprocessing_pipeline import validate_config as validate_config_preprocessing
 from bivme.fitting.perform_fit import perform_fitting
-from bivme.fitting.perform_fit import validate_config as validate_config_fitting
+from bivme.plotting.plot_guidepoints import generate_html
+
+def validate_config_preprocessing(config, mylogger):
+    assert os.path.exists(config["input_pp"]["source"]), \
+        f'DICOM folder does not exist! Make sure to add the correct directory under "source" in the config file.'
+    
+    if not (config["view-selection"]["option"] == "default" or config["view-selection"]["option"] == "image-only"  or config["view-selection"]["option"] == "load"):
+        mylogger.error(f'Invalid view selection option: {config["view-selection"]["option"]}. Must be "default", "image-only", or "load".')
+        sys.exit(0)
+
+    if not (config["view-selection"]["correct_mode"] == "automatic" or config["view-selection"]["correct_mode"] == "adaptive" or config["view-selection"]["correct_mode"] == "manual"):
+        mylogger.error(f'Invalid correct mode: {config["view-selection"]["correct_mode"]}. Must be "automatic", "adaptive", or "manual".')
+        sys.exit(0)
+
+    if not (config["contouring"]["smooth_landmarks"] == True or config["contouring"]["smooth_landmarks"] == False):
+        mylogger.error(f'Invalid smooth_landmarks option: {config["contouring"]["smooth_landmarks"]}. Must be true or false.')
+        sys.exit(0)
+
+    if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
+        mylogger.error(f'Invalid overwrite option: {config["output_pp"]["overwrite"]}. Must be true or false.')
+        sys.exit(0)
+
+def validate_config_fitting(config, mylogger):
+    assert Path(config["input_fitting"]["gp_directory"]).exists(), \
+        f'gp_directory does not exist. Cannot find {config["input_fitting"]["gp_directory"]}!'
+
+    if not (config["breathhold_correction"]["shifting"] == "derived_from_ed" or config["breathhold_correction"]["shifting"] == "average_all_frames" or config["breathhold_correction"]["shifting"] == "none"):
+        mylogger.error(f'argument shifting must be derived_from_ed, average_all_frames or none. {config["breathhold_correction"]["shifting"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
+        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
+        sys.exit(0)
+
+    for mesh in config["output_fitting"]["output_meshes"]:
+        if mesh not in ["LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"]:
+            mylogger.error(f'argument output_meshes invalid. {mesh} given. Allowed values are "LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"')
+            sys.exit(0)
+
+    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
+        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["closed_mesh"] == True or config["output_fitting"]["closed_mesh"] == False):
+        mylogger.error(f'argument closed_mesh must be true or false. {config["output_fitting"]["closed_mesh"]} given.')
+        sys.exit(0)
+
+    if not (config["output_fitting"]["overwrite"] == True or config["output_fitting"]["overwrite"] == False):
+        mylogger.error(f'argument overwrite must be true or false. {config["output_fitting"]["overwrite"]} given.')
+        sys.exit(0)
+
+    if not config["multiprocessing"]["workers"] > 0:
+        mylogger.error(f'argument workers must be a positive integer. {config["multiprocessing"]["workers"]} given.')
+        sys.exit(0)
 
 def run_preprocessing(case, config, mylogger):
     try:
         perform_preprocessing(case, config, mylogger)
+
+        if config["plotting"]["generate_plots_preprocessing"]:
+            start_time = time.time()
+            output = os.path.join(config["output_pp"]["output_directory"], config["input_pp"]["batch_ID"], case)  # output directory for guidepoints
+            plotting = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"]) # save the plotted htmls in processed directory
+
+            if config["plotting"]["include_images"]:
+                dst = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case)  # processed directory
+                image_path = os.path.join(dst, 'images')  # Path to the image file for plotting
+            else:
+                image_path = None
+
+            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path)
+
+            mylogger.info(f'Generated html plots (preprocessing) at {os.path.join(plotting,case,"html")}.')
+            mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
+
     except KeyboardInterrupt:
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
@@ -32,11 +102,31 @@ def run_fitting(case, config, mylogger):
                                         diagnose=True)
             
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
-        residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=config["input_fitting"]["gp_suffix"], si_suffix=config["input_fitting"]["si_suffix"],
-                        frames_to_fit=[], output_format=config["output_fitting"]["mesh_format"], logger=logger)
-        
+        gp_suffix = config["input_fitting"]["gp_suffix"]
+        si_suffix = config["input_fitting"]["si_suffix"]
+        start_time = time.time()
+        residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=gp_suffix, si_suffix=si_suffix,
+                        workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
+        mylogger.info(f"Fitting models for case {os.path.basename(case)} took: {time.time() - start_time:.2f} seconds")
         mylogger.info(f"Average residuals: {residuals} for case {os.path.basename(case)}")
 
+        if config["plotting"]["generate_plots_fitting"]:
+            start_time = time.time()
+            gp_dir = os.path.join(config["output_fitting"]["output_directory"], case, "gpfiles") # directory where the guidepoints are saved after fitting
+            model_dir = os.path.join(config["output_fitting"]["output_directory"], case) # directory where the fitted models are saved
+            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot
+
+            if config["plotting"]["include_images"]:
+                image_path = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case, "images")
+            else:
+                image_path = None
+
+            generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path)
+            
+            mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
+            mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
+            
         if config["logging"]["generate_log_file"]:
             mylogger.remove(logger_id)
 
@@ -88,7 +178,7 @@ if __name__ == "__main__":
             "breathhold_correction": {"shifting": str(), "ed_frame": int()},
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
-            "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float()},
+            "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float(), "lsq_trans_weight": float()},
             "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass

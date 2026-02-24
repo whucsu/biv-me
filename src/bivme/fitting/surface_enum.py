@@ -3,7 +3,6 @@ from enum import IntEnum, Enum
 
 class Surface(IntEnum):
     """ """
-
     LV_ENDOCARDIAL = 0  # LV_ENDOCARDIAL,
     RV_SEPTUM = 1  # RV septum,
     RV_FREEWALL = 2  # RV free wall,

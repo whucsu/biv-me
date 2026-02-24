@@ -1,514 +1,272 @@
-import os, sys
-import numpy as np
+import os
 import time
-import pandas as pd
-import plotly.graph_objs as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import numpy as np
 from pathlib import Path
-from plotly.offline import plot
 import re
 import fnmatch
-from copy import deepcopy
-from bivme.fitting.surface_enum import Surface, ControlMesh
-
-from bivme.fitting.BiventricularModel import BiventricularModel
-from bivme.fitting.GPDataSet import GPDataSet
-from bivme.fitting.surface_enum import ContourType
-from bivme.fitting.diffeomorphic_fitting_utils import (
-    solve_least_squares_problem,
-    solve_convex_problem,
-    plot_timeseries,
-)
-from bivme.plotting.plot_guidepoints import plot_images
-
-from bivme.meshing.mesh_io import write_vtk_surface, export_to_obj
 from loguru import logger
-from rich.progress import Progress
+
+from bivme.fitting.GPDataSet import GPDataSet
+from bivme.fitting.build_model_tools import create_ref_dataset, gp_rv_valve_generator, set_default_weights
+from bivme.fitting.BiventricularModel import BiventricularModel
+from bivme.fitting.diffeomorphic_fitting_utils import solve_least_squares_problem
+
+from bivme.fitting.diffeomorphic_fitting_utils import solve_convex_fast
 from bivme import MODEL_RESOURCE_DIR
+from bivme.fitting.fitting_tools import add_valves, get_verts_faces, get_verts_faces_control
+from bivme.fitting.surface_enum import ControlMesh, Surface
+from bivme.meshing.mesh_io import export_mesh
 
-# This list of contours_to _plot was taken from Liandong Lee
-contours_to_plot = [
-    ContourType.LAX_RA,
-    ContourType.LAX_LA,
-    ContourType.LAX_RV_ENDOCARDIAL,
-    ContourType.SAX_RV_FREEWALL,
-    ContourType.LAX_RV_FREEWALL,
-    ContourType.SAX_RV_SEPTUM,
-    ContourType.LAX_RV_SEPTUM,
-    ContourType.SAX_LV_ENDOCARDIAL,
-    ContourType.SAX_LV_EPICARDIAL,
-    ContourType.RV_INSERT,
-    ContourType.APEX_POINT,
-    ContourType.MITRAL_VALVE,
-    ContourType.TRICUSPID_VALVE,
-    ContourType.AORTA_VALVE,
-    ContourType.PULMONARY_VALVE,
-    ContourType.SAX_RV_EPICARDIAL,
-    ContourType.LAX_RV_EPICARDIAL,
-    ContourType.LAX_LV_ENDOCARDIAL,
-    ContourType.LAX_LV_EPICARDIAL,
-    ContourType.SAX_RV_OUTLET,
-    ContourType.AORTA_PHANTOM,
-    ContourType.TRICUSPID_PHANTOM,
-    ContourType.MITRAL_PHANTOM,
-    ContourType.PULMONARY_PHANTOM,
-    ContourType.EXCLUDED,
-]
 
-def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", frames_to_fit: list[int]=[], output_format: str =".vtk", my_logger: logger = logger, **kwargs) -> float:
-    # performs all the BiVentricular fitting operations
-
+def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", workers: int = 1,
+                    output_format: str =".vtk", my_logger: logger = logger) -> float:
     try:
-        #if "iter_num" in kwargs:
-        #    iter_num = kwargs.get("iter_num", None)
-        #    pid = os.getpid()
-        #    # print('child PID', pid)
-        #    # assign a new process ID and a new CPU to the child process
-        #    # iter_num corresponds to the id number of the CPU where the process will be run
-        #    os.system("taskset -cp %d %d" % (iter_num, pid))
-
-        if "id_Frame" in kwargs:
-            # acquire .csv file containing patient_id, ES frame number, ED frame number if present
-            case_frame_dict = kwargs.get("id_Frame", None)
-
-        filename_info = Path(folder) / f"SliceInfoFile{si_suffix}.txt"
+        # Find slice info file
+        filename_info = Path(folder) / f"SliceInfoFile.txt"
         if not filename_info.exists():
             my_logger.error(f"Cannot find {filename_info} file! Skipping this model")
             return -1
 
-        # extract the patient name from the folder name
-        case = os.path.basename(os.path.normpath(folder))
-        my_logger.info(f"case: {case}")
+        # Extract the patient name from the folder name
+        case_name = os.path.basename(os.path.normpath(folder))
 
-        rule = re.compile(fnmatch.translate(f"GPFile_{gp_suffix}*.txt"), re.IGNORECASE)
+        # Find all the guide point files in the folder
+        rule = re.compile(fnmatch.translate(f"GPFile_*.txt"), re.IGNORECASE)
         time_frame = [Path(folder) / Path(name) for name in os.listdir(Path(folder)) if rule.match(name)]
-        frame_name = [re.search(r'GPFile_*(\d+)\.txt', str(file), re.IGNORECASE)[1] for file in time_frame]
-        frame_name = sorted(frame_name)
+        frame_names = [re.search(r'GPFile_*(\d+)\.txt', str(file), re.IGNORECASE)[1] for file in time_frame]
+        frame_names = sorted(frame_names)
+        frames_to_fit = sorted(np.unique(frame_names))  # if you want to fit all _frames#
 
-        ed_frame = config["breathhold_correction"]["ed_frame"]
-        my_logger.info(f'ED set to frame #{config["breathhold_correction"]["ed_frame"]}')
-
-        if len(frames_to_fit) == 0:
-            frames_to_fit = np.unique(
-                frame_name
-            )  # if you want to fit all _frames#
-
-        # create a separate output folder for each patient
-        output_folder = Path(out_dir) / case
-        Path(output_folder).mkdir(parents=True, exist_ok=True)
-
-        # create log files where to store fitting errors and shift
-        shift_file = output_folder / f"shift_file{gp_suffix}.txt"
-        pos_file = output_folder / f"pos_file{gp_suffix}.txt"
-
-        # The next lines are used to measure shift using only a key frame
-        if config["breathhold_correction"]["shifting"] == "derived_from_ed":
-            my_logger.info("Shift measured only at ED frame")
-            filename = Path(folder) / f"GPFile_{gp_suffix}{frame_name[ed_frame]:03}.txt"
-
-            if not filename.exists():
-                my_logger.error(f"Cannot find {filename} file! Skipping this model")
-                return -1
-
-            ed_dataset = GPDataSet(
-                str(filename),
-                str(filename_info),
-                case,
-                sampling=config["gp_processing"]["sampling"],
-                time_frame_number=ed_frame,
-            )
-            if not ed_dataset.success:
-                return -1
-            result_at_ed = ed_dataset.sinclair_slice_shifting(my_logger)
-            _, _ = ed_dataset.get_unintersected_slices()
-
-            ##TODO remove basal slice (maybe looking at the distance between the contours centroid and the projection of the line mitral centroid/apex)
-            shift_to_apply = result_at_ed[0]
-            updated_slice_position = result_at_ed[1]
-
-            with shift_file.open("w", encoding ="utf-8") as file:
-                file.write("shift measured only at ED: frame " + str(ed_frame) + "\n")
-                file.write(str(shift_to_apply))
-                file.close()
-
-            with pos_file.open("w", encoding ="utf-8") as file:
-                file.write("pos measured only at ED: frame " + str(ed_frame) + "\n")
-                file.write(str(updated_slice_position))
-                file.close()
-
-        elif config["breathhold_correction"]["shifting"] == "average_all_frames":
-            my_logger.info("Shift measured on all the frames and averaged")
-            shift_to_apply = 0  # 2D translation
-            updated_slice_position = 0
-            counter = 0
-            for frame in sorted(frames_to_fit):
-                num = int(frame)
-                filename = Path(folder) / f"GPFile_{gp_suffix}{num:03}.txt"
-                if not filename.exists():
-                    my_logger.error(f"Cannot find {filename} file! Skipping this model")
-                    return -1
-
-                dataset = GPDataSet(
-                    str(filename),
-                    str(filename_info),
-                    case,
-                    sampling=config["gp_processing"]["sampling"],
-                    time_frame_number=num,
-                )
-
-                if frame == frames_to_fit[ed_frame]:
-                    ed_dataset = deepcopy(dataset)
-                if not dataset.success:
-                    continue
-                result_at_t = dataset.sinclair_slice_shifting(my_logger)
-
-                shift_to_apply += result_at_t[0]
-                updated_slice_position += result_at_t[1]
-                counter += 1
-
-            shift_to_apply /= counter
-            updated_slice_position /= counter
-
-            with shift_file.open("w", encoding ="utf-8") as file:
-                file.write("Average shift \n")
-                file.write(str(shift_to_apply))
-                file.close()
-
-            with pos_file.open("w", encoding ="utf-8") as file:
-                file.write("Average shift \n")
-                file.write(str(updated_slice_position))
-                file.close()
-
-        elif config["breathhold_correction"]["shifting"] == "none":
-            my_logger.info("No correction applied")
-            filename = Path(folder) / f"GPFile_{gp_suffix}{frame_name[ed_frame]:03}.txt"
-            if not filename.exists():
-                my_logger.error(f"Cannot find {filename} file! Skipping this model")
-                return -1
-
-            ed_dataset = GPDataSet(
-                str(filename),
-                str(filename_info),
-                case,
-                sampling=config["gp_processing"]["sampling"],
-                time_frame_number=ed_frame,
-            )
-            if not ed_dataset.success:
-                return -1
-
-        else:
-            my_logger.error(f'Method {config["breathhold_correction"]["shifting"]} unavailable.  Allowed values: none, derived_from_ed or average_all_frame. No correction applied')
+        if len(frame_names) == 0:
+            my_logger.error(f"Cannot find any GPFiles in {folder}! Skipping this case")
             return -1
 
-        biventricular_model = BiventricularModel(MODEL_RESOURCE_DIR, case)
+        # Create results and models output folders
+        output_folder = Path(out_dir) / case_name
+        Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-        my_logger.info(f"Calculating pose and scale {str(case)}...")
-        biventricular_model.update_pose_and_scale(ed_dataset)
-        aligned_biventricular_model = deepcopy(biventricular_model)
+        # Measure shift using key reference frame (e.g., ed_frame)
+        start_time = time.time()
+        my_logger.info(f"Creating reference dataset...")
+        try:
+            ed_dataset, shift_to_apply, updated_slice_position = create_ref_dataset(config,
+                                                                                    folder,
+                                                                                    output_folder,
+                                                                                    filename_info,
+                                                                                    case_name,
+                                                                                    frame_names,
+                                                                                    logger)
+        except TypeError:
+            my_logger.error(f"Cannot initialize reference dataset! Skipping this case")
+            return -1
+        
+        # Create reference biv model and update its pose/scale
+        aligned_biv_model = BiventricularModel(MODEL_RESOURCE_DIR, folder)
+        aligned_biv_model.update_pose_and_scale(ed_dataset)
+        logger.info(f"[CHECKPOINT][REF] Creating reference dataset took: {time.time() - start_time}s")
 
-        # initialise time series lists
-        my_logger.info(f"Fitting of {str(case)}")
+        # Prepare all guide point datasets upfront (to avoid read/write parallelization slowdowns)
+        start_time = time.time()
+        my_logger.info(f"Creating all guide point datasets upfront...")
+        gp_dataset_list = prepare_all_gp_datasets(config, frames_to_fit, output_folder, folder, filename_info,
+                                                  case_name, shift_to_apply, updated_slice_position, logger)
+        logger.info(f"[CHECKPOINT][PREP] Preparing guide point models took: {time.time() - start_time}s")
 
-        residuals = 0
-        with Progress(auto_refresh=False, transient=True) as progress:
-            task = progress.add_task(f"Processing {len(frames_to_fit)} frames of {case}", total=len(frames_to_fit))
-            console = progress
+        # Fit all frames in parallel
+        start_time = time.time()
+        my_logger.info(f"Fitting...")
 
-            image_grids = {}
-
-            for idx, num in enumerate(sorted(frames_to_fit)):
-                progress.refresh()
-                num = int(num)  # frame number
-
-                my_logger.info(f"Processing frame #{num}")
-                model_file = Path(
-                    output_folder, f"{case}{gp_suffix}_model_frame_{num:03}.txt"
-                )
-                model_file.touch(exist_ok=True)
-
-                filename = Path(folder) / f"GPFile_{gp_suffix}{num:03}.txt"
-                if not filename.exists():
-                    my_logger.error(f"Cannot find {filename} file! Skipping this model")
+        errors = {}
+        model_dict = {}
+        total_residual = 0.0
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            # Set up futures queue
+            futs = {
+                ex.submit(_fit_one_frame, config, data_set, aligned_biv_model): data_set
+                for data_set in gp_dataset_list
+            }
+            for idx,fut in enumerate(as_completed(futs)):
+                data_set = futs[fut]
+                if data_set is None:
+                    num = f"{idx:.3f}" # get frame number from index
+                    errors[num] = RuntimeError("Failed to prepare dataset")
                     continue
-
-                data_set = GPDataSet(
-                    str(filename), str(filename_info), case, sampling=config["gp_processing"]["sampling"], time_frame_number=num
-                )
-                if not data_set.success:
-                    my_logger.error(f"Cannot initialize GPDataSet! Skipping this frame")
-                    continue
-
-                if config["breathhold_correction"]["shifting"] != "none":
-                    data_set.apply_slice_shift(shift_to_apply, updated_slice_position)
-                    data_set.get_unintersected_slices()
-
-                # Generates RV epicardial point if they have not been contoured
-                if sum(data_set.contour_type == (ContourType.SAX_RV_EPICARDIAL)) == 0 and sum(data_set.contour_type == ContourType.LAX_RV_EPICARDIAL) == 0:
-                    my_logger.info('Generating RV epicardial points')
-                    _, _, _ = data_set.create_rv_epicardium(
-                        rv_thickness=3
-                    )
-
+                num = data_set.get_frame_num()
                 try:
-                    _ = data_set.create_valve_phantom_points(config["gp_processing"]["num_of_phantom_points_mv"], ContourType.MITRAL_VALVE)
-                except:
-                    my_logger.warning('Error in creating mitral phantom points')
+                    biv_model, residual = fut.result()
+                    model_dict[num] = biv_model
+                    total_residual += residual  # will raise if the worker threw
+                except Exception as e:
+                    errors[num] = e
 
-                try:
-                    _ = data_set.create_valve_phantom_points(config["gp_processing"]["num_of_phantom_points_tv"], ContourType.TRICUSPID_VALVE)
-                except:
-                    my_logger.warning('Error in creating tricuspid phantom points')
+        logger.info(f"[CHECKPOINT][BIV] Fit model for phase {num}")
+        logger.info(f"[CHECKPOINT][RES] Residual: {residual}")
 
-                try:
-                    _ = data_set.create_valve_phantom_points(config["gp_processing"]["num_of_phantom_points_pv"], ContourType.PULMONARY_VALVE)
-                except:
-                    my_logger.warning('Error in creating pulmonary phantom points')
+        # Handle any accumulated errors (only called at end)
+        if errors:
+            # Try to throw a summarized error
+            msg = "Some frames failed: " + ", ".join(f"{int(k):03d}: {type(v).__name__}" for k, v in errors.items())
+            logger.error(msg)
+        logger.info(f"[CHECKPOINT][FIT] Fitting models took: {time.time() - start_time}s")
 
-                try:
-                    _ = data_set.create_valve_phantom_points(config["gp_processing"]["num_of_phantom_points_av"], ContourType.AORTA_VALVE)
-                except:
-                    my_logger.warning('Error in creating aorta phantom points')
+        # Finalize
+        start_time = time.time()
 
-                # Example on how to set different weights for different points group (R.B.)
-                data_set.weights[data_set.contour_type == ContourType.MITRAL_PHANTOM] = 1
-                data_set.weights[data_set.contour_type == ContourType.AORTA_PHANTOM] = 1
-                data_set.weights[data_set.contour_type == ContourType.PULMONARY_PHANTOM] = 1
-                data_set.weights[data_set.contour_type == ContourType.TRICUSPID_PHANTOM] = 1
+        my_logger.info(f"Writing out biventricular model data to files...")
+        write_all_biv_models(config, model_dict, output_format, output_folder, case_name, logger)
+        logger.info(f"[CHECKPOINT][WRITE] Writing out biv models to disk took: {time.time() - start_time}s")
 
-                data_set.weights[data_set.contour_type == ContourType.APEX_POINT] = 1
-                data_set.weights[data_set.contour_type == ContourType.RV_INSERT] = 2
+        # Write GP files for plotting
+        my_logger.info(f"Writing out guide point files...")
+        write_all_gpfiles(gp_dataset_list, output_folder, case_name, logger)
+        logger.info(f"[CHECKPOINT][WRITE] Writing out GP files to disk took: {time.time() - start_time}s")
 
-                data_set.weights[data_set.contour_type == ContourType.MITRAL_VALVE] = 1
-                data_set.weights[data_set.contour_type == ContourType.AORTA_VALVE] = 1
-                data_set.weights[data_set.contour_type == ContourType.PULMONARY_VALVE] = 1
-                data_set.weights[data_set.contour_type == ContourType.TRICUSPID_VALVE] = 1
+        return total_residual / len(frames_to_fit)
 
-                # Perform linear fit
-                biventricular_model = deepcopy(aligned_biventricular_model)
-                solve_least_squares_problem(biventricular_model, config["fitting_weights"]["guide_points"], data_set, my_logger)
-
-                ## Perform diffeomorphic fit
-                residuals += solve_convex_problem(
-                    biventricular_model,
-                    data_set,
-                    config["fitting_weights"]["guide_points"],
-                    config["fitting_weights"]["convex_problem"],
-                    config["fitting_weights"]["transmural"],
-                    my_logger,
-                ) / len(sorted(frames_to_fit))
-
-                if config["plotting"]["generate_plots_fitting"]:
-                    # Plot final results
-                    contour_plots = data_set.plot_dataset(contours_to_plot)
-                    model = biventricular_model.plot_surface(
-                        "rgb(0,127,0)", "rgb(0,127,127)", "rgb(127,0,0)", "all"
-                    )
-
-                    data = contour_plots + model
-
-                    if config["plotting"]["include_images"]:
-                        image_dir = Path(config["input_pp"]["processing"]) / config["input_pp"]["batch_ID"] / os.path.basename(case) / "images"
-
-                        if config["plotting"]["export_images"]:
-                            output_dir = Path(output_folder) / "images"
-                            output_dir.mkdir(exist_ok=True)
-                        else:
-                            output_dir = None
-
-                        if not image_dir.exists():
-                            my_logger.warning(f"Image directory {image_dir} does not exist! Skipping image plotting")
-
-                        else:
-                            image_plots, image_grids = plot_images(image_dir, data_set, image_grids, output_dir, shift_to_apply, num)
-                            data += image_plots
-                        
-                    output_folder_html = Path(output_folder, f"html{gp_suffix}")
-                    output_folder_html.mkdir(exist_ok=True)
-
-                    figure = go.Figure(data=data)
-
-                    figure.update_layout(
-                        paper_bgcolor='white',                
-                        title=f"Model and guidepoints for {case} - Frame {num:03}",
-                    )
-                    figure.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False)
-
-                    plot(
-                        figure,
-                        filename=os.path.join(
-                            output_folder_html, f"{case}_fitted_model_frame_{num:03}.html"
-                        ),
-                        auto_open=False,
-                    )
-
-                # save results in .txt format, one file for each frame
-                model_data = {
-                    "x": biventricular_model.control_mesh[:, 0],
-                    "y": biventricular_model.control_mesh[:, 1],
-                    "z": biventricular_model.control_mesh[:, 2],
-                    "Frame": [num] * len(biventricular_model.control_mesh[:, 2]),
-                }
-
-                model_data_frame = pd.DataFrame(data=model_data)
-                with open(model_file, "w") as file:
-                    file.write(
-                        model_data_frame.to_csv(
-                            header=True, index=False, sep=",", lineterminator="\n"
-                        )
-                    )
-
-                if output_format != "none":
-                    meshes = {}
-                    for surface in Surface:
-                        mesh_data = {}
-                        if surface.name in config["output_fitting"]["output_meshes"]:
-                            mesh_data[surface.name] = surface.value
-                            if surface.name == "LV_ENDOCARDIAL" and config["output_fitting"]["closed_mesh"] == True:
-                                mesh_data["MITRAL_VALVE"] = Surface.MITRAL_VALVE.value
-                                mesh_data["AORTA_VALVE"] = Surface.AORTA_VALVE.value
-                            if surface.name == "EPICARDIAL" and config["output_fitting"]["closed_mesh"] == True:
-                                mesh_data["PULMONARY_VALVE"] = Surface.PULMONARY_VALVE.value
-                                mesh_data["TRICUSPID_VALVE"] = Surface.TRICUSPID_VALVE.value
-                                mesh_data["MITRAL_VALVE"] = Surface.MITRAL_VALVE.value
-                                mesh_data["AORTA_VALVE"] = Surface.AORTA_VALVE.value
-                            meshes[surface.name] = mesh_data
-
-                    if "RV_ENDOCARDIAL" in config["output_fitting"]["output_meshes"]:
-                        mesh_data["RV_SEPTUM"] = Surface.RV_SEPTUM.value
-                        mesh_data["RV_FREEWALL"] = Surface.RV_FREEWALL.value
-                        if config["output_fitting"]["closed_mesh"]:
-                            mesh_data["PULMONARY_VALVE"] = Surface.PULMONARY_VALVE.value
-                            mesh_data["TRICUSPID_VALVE"] = Surface.TRICUSPID_VALVE.value
-                        meshes["RV_ENDOCARDIAL"] = mesh_data
-
-                    ##TODO remove duplicated code here - not sure how yet
-                    if config["output_fitting"]["export_control_mesh"]:
-                        control_mesh_meshes = {}
-                        for surface in ControlMesh:
-                            control_mesh_mesh_data = {}
-                            if surface.name in config["output_fitting"]["output_meshes"]:
-                                control_mesh_mesh_data[surface.name] = surface.value
-                                if surface.name == "LV_ENDOCARDIAL" and config["output_fitting"]["closed_mesh"] == True:
-                                    control_mesh_mesh_data["MITRAL_VALVE"] = ControlMesh.MITRAL_VALVE.value
-                                    control_mesh_mesh_data["AORTA_VALVE"] = ControlMesh.AORTA_VALVE.value
-                                if surface.name == "EPICARDIAL" and config["output_fitting"]["closed_mesh"] == True:
-                                    control_mesh_mesh_data["PULMONARY_VALVE"] = ControlMesh.PULMONARY_VALVE.value
-                                    control_mesh_mesh_data["TRICUSPID_VALVE"] = ControlMesh.TRICUSPID_VALVE.value
-                                    control_mesh_mesh_data["MITRAL_VALVE"] = ControlMesh.MITRAL_VALVE.value
-                                    control_mesh_mesh_data["AORTA_VALVE"] = ControlMesh.AORTA_VALVE.value
-                                if surface.name == "RV_ENDOCARDIAL" and config["output_fitting"]["closed_mesh"] == True:
-                                    control_mesh_mesh_data["PULMONARY_VALVE"] = ControlMesh.PULMONARY_VALVE.value
-                                    control_mesh_mesh_data["TRICUSPID_VALVE"] = ControlMesh.TRICUSPID_VALVE.value
-
-                                control_mesh_meshes[surface.name] = control_mesh_mesh_data
-
-                    for key, value in meshes.items():
-                        vertices = np.array([]).reshape(0, 3)
-                        faces_mapped = np.array([], dtype=np.int64).reshape(0, 3)
-
-                        offset = 0
-                        for type in value:
-                            start_fi = biventricular_model.surface_start_end[value[type]][0]
-                            end_fi = biventricular_model.surface_start_end[value[type]][1] + 1
-                            faces_et = biventricular_model.et_indices[start_fi:end_fi]
-                            unique_inds = np.unique(faces_et.flatten())
-                            vertices = np.vstack((vertices, biventricular_model.et_pos[unique_inds]))
-
-                            # remap faces/indices to 0-indexing
-                            mapping = {old_index: new_index for new_index, old_index in enumerate(unique_inds)}
-                            faces_mapped = np.vstack((faces_mapped, np.vectorize(mapping.get)(faces_et) + offset))
-                            offset += len(biventricular_model.et_pos[unique_inds])
-
-                        if output_format == ".vtk":
-                            output_folder_vtk = Path(output_folder, f"vtk{gp_suffix}")
-                            output_folder_vtk.mkdir(exist_ok=True)
-                            mesh_path = Path(
-                                output_folder_vtk, f"{case}_{key}_{num:03}.vtk"
-                            )
-                            write_vtk_surface(str(mesh_path), vertices, faces_mapped)
-                            my_logger.success(f"{case}_{key}_{num:03}.vtk successfully saved to {output_folder_vtk}")
-
-                        elif output_format == ".obj":
-                            output_folder_obj = Path(output_folder, f"obj{gp_suffix}")
-                            output_folder_obj.mkdir(exist_ok=True)
-                            mesh_path = Path(
-                                output_folder_obj, f"{case}_{key}_{num:03}.obj"
-                            )
-                            export_to_obj(mesh_path, vertices, faces_mapped)
-                            my_logger.success(f"{case}_{key}_{num:03}.obj successfully saved to {output_folder_obj}")
-                        else:
-                            my_logger.error('argument format must be .obj or .vtk')
-                            return -1
-
-                    ##TODO remove duplicated code here - not sure how yet
-                    if config["output_fitting"]["export_control_mesh"]:
-                        for key, value in control_mesh_meshes.items():
-                            vertices = np.array([]).reshape(0, 3)
-                            faces_mapped = np.array([], dtype=np.int64).reshape(0, 3)
-
-                            offset = 0
-                            for type in value:
-                                start_fi = biventricular_model.control_mesh_start_end[value[type]][0]
-                                end_fi = biventricular_model.control_mesh_start_end[value[type]][1] + 1
-                                faces_et = biventricular_model.et_indices_control_mesh[start_fi:end_fi]
-                                unique_inds = np.unique(faces_et.flatten())
-                                vertices = np.vstack((vertices, biventricular_model.control_mesh[unique_inds]))
-
-                                # remap faces/indices to 0-indexing
-                                mapping = {old_index: new_index for new_index, old_index in enumerate(unique_inds)}
-                                faces_mapped = np.vstack((faces_mapped, np.vectorize(mapping.get)(faces_et) + offset))
-                                offset += len(biventricular_model.control_mesh[unique_inds])
-
-                            if output_format == ".vtk":
-                                output_folder_vtk = Path(output_folder, f"vtk{gp_suffix}")
-                                output_folder_vtk.mkdir(exist_ok=True)
-                                mesh_path = Path(
-                                    output_folder_vtk, f"{case}_{key}_{num:03}_control_mesh.vtk"
-                                )
-                                write_vtk_surface(str(mesh_path), vertices, faces_mapped)
-                                my_logger.success(f"{case}_{key}_{num:03}_control_mesh.vtk successfully saved to {output_folder_vtk}")
-
-                            elif output_format == ".obj":
-                                output_folder_obj = Path(output_folder, f"obj{gp_suffix}")
-                                output_folder_obj.mkdir(exist_ok=True)
-                                mesh_path = Path(
-                                    output_folder_obj, f"{case}_{key}_{num:03}_control_mesh.obj"
-                                )
-                                export_to_obj(mesh_path, vertices, faces_mapped)
-                                my_logger.success(f"{case}_{key}_{num:03}_control_mesh.obj successfully saved to {output_folder_obj}")
-                            else:
-                                my_logger.error('argument format must be .obj or .vtk')
-                                return -1
-
-                progress.advance(task)
-        return residuals
     except KeyboardInterrupt:
         return -1
-    
-def validate_config(config, mylogger):
-    assert Path(config["input_fitting"]["gp_directory"]).exists(), \
-        f'gp_directory does not exist. Cannot find {config["input_fitting"]["gp_directory"]}!'
 
-    if not (config["breathhold_correction"]["shifting"] == "derived_from_ed" or config["breathhold_correction"]["shifting"] == "average_all_frames" or config["breathhold_correction"]["shifting"] == "none"):
-        mylogger.error(f'argument shifting must be derived_from_ed, average_all_frames or none. {config["breathhold_correction"]["shifting"]} given.')
-        sys.exit(0)
+def prepare_all_gp_datasets(config,
+                        frames_to_fit,
+                        output_folder,
+                        folder,
+                        filename_info,
+                        case_name,
+                        shift_to_apply,
+                        updated_slice_position,
+                        logger):
 
-    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
-        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
-        sys.exit(0)
+    gp_dataset_list = []
+    for frame_num in frames_to_fit:
+        # Extract config parameters
+        bh_corr_method = config["breathhold_correction"]["shifting"]
+        gp_ds_factor = config["gp_processing"]["sampling"]
 
-    for mesh in config["output_fitting"]["output_meshes"]:
-        if mesh not in ["LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"]:
-            mylogger.error(f'argument output_meshes invalid. {mesh} given. Allowed values are "LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"')
-            sys.exit(0)
+        # Create file
+        # TODO: Move this to export function
+        logger.info(f"Processing frame #{frame_num}")
+        model_file = Path(output_folder, f"{case_name}_model_frame_{frame_num:03}.txt")
+        model_file.touch(exist_ok=True)
 
-    if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
-        mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
-        sys.exit(0)
+        # Check if GP file exists
+        filename = Path(folder) / f"GPFile_{frame_num:03}.txt"
+        if not filename.exists():
+            logger.error(f"Cannot find {filename} file! Skipping this model")
+            gp_dataset_list.append(None)
+            continue
 
-    if not (config["output_fitting"]["closed_mesh"] == True or config["output_fitting"]["closed_mesh"] == False):
-        mylogger.error(f'argument closed_mesh must be true or false. {config["output_fitting"]["closed_mesh"]} given.')
-        sys.exit(0)
+        # Start processing this frame
+        data_set = GPDataSet(str(filename), str(filename_info), case_name, sampling=gp_ds_factor, frame_num=frame_num)
+        if not data_set.success:
+            logger.error(f"Cannot initialize GPDataSet! Skipping this frame")
+            gp_dataset_list.append(None)
+            continue
 
-    if not (config["output_fitting"]["overwrite"] == True or config["output_fitting"]["overwrite"] == False):
-        mylogger.error(f'argument overwrite must be true or false. {config["output_fitting"]["overwrite"]} given.')
-        sys.exit(0)
+        # Apply breath-hold correction if needed
+        if bh_corr_method != "none":
+            data_set.apply_slice_shift_fast(shift_to_apply, updated_slice_position)
+            data_set.get_unintersected_slices_fast()
+
+        # Generates RV epicardium and valve phantoms (if needed)
+        # TODO: Make rv_thickness a config parameter
+        gp_rv_valve_generator(data_set, config, logger, rv_thickness=3)
+        set_default_weights(data_set)  # Example on how to set different weights for different points group (R.B.)
+
+        gp_dataset_list.append(data_set)
+
+    return gp_dataset_list
+
+def _fit_one_frame(config, data_set, aligned_biv_model):
+    if data_set is None:
+        return None, -1
+
+    # Get config parameters upfront
+    gp_weight = config["fitting_weights"]["guide_points"]
+    conv_weight = config["fitting_weights"]["convex_problem"]
+    trans_weight = config["fitting_weights"]["transmural"]
+    lsq_trans_weight = config["fitting_weights"]["lsq_trans_weight"]
+
+    # Perform linear fit
+    biv_model = aligned_biv_model.copy()
+    solve_least_squares_problem(biv_model, gp_weight, data_set, lsq_trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
+
+    ## Perform diffeomorphic fit
+    residual = solve_convex_fast(biv_model, data_set, gp_weight, conv_weight, trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
+
+    return biv_model, residual
+
+def write_all_biv_models(config, model_dict, output_format, output_folder, case_name, logger):
+    # Get config parameters
+    is_closed = config["output_fitting"]["closed_mesh"]
+    meshes_to_export = config["output_fitting"]["output_meshes"]
+    export_control_mesh = config["output_fitting"]["export_control_mesh"]
+
+    # Write out models as text files
+    for phase, biv_model in model_dict.items():
+        arr = np.column_stack([
+            biv_model.control_mesh[:, 0],  # x
+            biv_model.control_mesh[:, 1],  # y
+            biv_model.control_mesh[:, 2],  # z
+            np.full(len(biv_model.control_mesh), phase)  # Frame
+        ])
+        header = "x,y,z,Frame"
+        model_file = Path(output_folder, f"{case_name}_model_frame_{phase:03}.txt")
+        np.savetxt(model_file, arr, delimiter=",", header=header, comments="", fmt="%s,%s,%s,%s")
+
+        # Save VTK or OBJ files
+        if output_format != "none":
+            meshes = {}
+            for surface in Surface:
+                if surface.name in meshes_to_export:
+                    mesh_data = {surface.name: surface.value}
+                    add_valves(surface.name, mesh_data, is_closed) # add valves if want closed
+                    meshes[surface.name] = mesh_data
+
+            # Special handling for RV endo
+            if "RV_ENDOCARDIAL" in meshes_to_export:
+                rv_mesh = {"RV_SEPTUM": Surface.RV_SEPTUM.value, "RV_FREEWALL": Surface.RV_FREEWALL.value}
+                add_valves("RV_ENDOCARDIAL", rv_mesh, is_closed)
+                meshes["RV_ENDOCARDIAL"] = rv_mesh
+
+            # Export all requested meshes
+            for key, value in meshes.items():
+                vertices, faces_mapped = get_verts_faces(biv_model, value)
+                mesh_filename = f"{case_name}_{key}_{phase:03}{output_format}"
+                export_mesh(output_format, output_folder, mesh_filename, vertices, faces_mapped, logger)
+
+            # Export control mesh (if applicable)
+            if export_control_mesh:
+                control_mesh_meshes = {}
+                for surface in ControlMesh:
+                    if surface.name in meshes_to_export:
+                        control_mesh_mesh_data = {surface.name: surface.value}
+                        control_mesh_meshes[surface.name] = control_mesh_mesh_data
+
+                for key, value in control_mesh_meshes.items():
+                    vertices, faces_mapped = get_verts_faces_control(biv_model, value)
+                    mesh_filename = f"{case_name}_{key}_{phase:03}_control_mesh{output_format}"
+                    export_mesh(output_format, output_folder, mesh_filename, vertices, faces_mapped, logger)
+
+def write_all_gpfiles(gpdataset_list, output_folder, case_name, logger):
+    mdata_saved = False
+    for data_set in gpdataset_list:
+        if data_set is None:
+            continue
+
+        gpfile_folder = Path(output_folder) / "gpfiles"
+        gpfile_folder.mkdir(parents=True, exist_ok=True)
+
+        # Write slice info file (only once)
+        if not mdata_saved:
+            metadata_filename = gpfile_folder / f"{case_name}_SliceInfoFile.txt"
+            data_set.write_sliceinfofile(str(metadata_filename))
+            logger.success(f"{os.path.basename(metadata_filename)} successfully saved to {metadata_filename}")
+            mdata_saved = True
+
+        # Write GP file
+        frame_num = data_set.get_frame_num()
+        gpfile_name = gpfile_folder / f"{case_name}_GPFile_{frame_num:03}.txt"
+        data_set.write_gpfile(str(gpfile_name), int(frame_num))
+        logger.success(f"{os.path.basename(gpfile_name)} successfully saved to {gpfile_name}")

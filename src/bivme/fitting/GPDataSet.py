@@ -1,19 +1,13 @@
-from ctypes.wintypes import tagPOINT
-from sqlite3 import SQLITE_CREATE_INDEX
 import numpy as np
-import pandas as pd
 import warnings
 import os
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from loguru import logger
 
 # local imports
 from . import fitting_tools as tools
 import re
 from .surface_enum import *
-from bivme.fitting import surface_enum
 from bivme.fitting.Slice import Slice
+from loguru import logger
 
 SAMPLED_CONTOUR_TYPES = [
     ContourType.LAX_LV_ENDOCARDIAL,
@@ -52,7 +46,6 @@ UNSAMPLED_CONTOUR_TYPES = [
 
 ##Author : Charlène Mauger, University of Auckland, c.mauger@auckland.ac.nz
 class GPDataSet(object):
-
     """This class reads a dataset. A DataSet object has the following properties:
 
     Attributes:
@@ -67,12 +60,12 @@ class GPDataSet(object):
     """
 
     def __init__(
-        self,
-        contour_filename: str = None,
-        metadata_filename: str = None,
-        case: str = "default",
-        sampling: int =1,
-        time_frame_number: int=None,
+            self,
+            contour_filename: str = None,
+            metadata_filename: str = None,
+            case: str = "default",
+            sampling: int = 1,
+            frame_num: int = None,
     ) -> None:
         """Return a DataSet object. Each point of this dataset is characterized by
         its 3D coordinates ([Evenly_spaced_points[:,0],Evenly_spaced_points[:,1],
@@ -85,7 +78,7 @@ class GPDataSet(object):
                 filenameInfo: filename is the file containing dicom info
                             (see example SliceInfoFile.txt).
                 case: case number
-                time_frame_number: time frame #
+                frame_num: time frame #
         """
 
         self.points_coordinates = np.empty((0, 3))
@@ -99,7 +92,7 @@ class GPDataSet(object):
         self.case = case
 
         # scalars
-        self.time_frame = time_frame_number
+        self.time_frame = frame_num
         if contour_filename is not None:
             self.read_contour_file(contour_filename, sampling)
             self.success = self.initialize_landmarks()
@@ -116,8 +109,7 @@ class GPDataSet(object):
         # If you don't have this problem with your dataset, you can comment it.
         # self.identify_mitral_valve_points()
 
-
-    def read_contour_file(self, filename: str, sampling: int=1) -> None:
+    def read_contour_file(self, filename: str, sampling: int = 1) -> None:
         """add  by A. Mira 02/2020"""
         # column num 3 of my datset is a space
         if not os.path.exists(filename):
@@ -128,20 +120,20 @@ class GPDataSet(object):
         contour_types = []
         weights = []
         try:
-            data = pd.read_csv(
-                open(filename), sep="\t", header=None, low_memory=False
-            )  # LDT 15/11 added low_memory False
-            for line_index, line in enumerate(data.values[1:]):
-                points.append([float(x) for x in line[:3]])
+            dtype = [('x', float), ('y', float), ('z', float), ('contour', 'U32'), ('slice', int), ('weight', float)]
+            data = np.genfromtxt(
+                filename,
+                delimiter="\t",
+                names=True,  # read first line as header
+                dtype=dtype,
+                autostrip=True,
+                encoding='utf-8',
+            )
 
-                slices.append(int(line[4]))
-                contour_types.append(line[3])
-                weights.append(float(line[5]))
-
-            points = np.array(points)
-            slices = np.array(slices)
-            contour_types = np.array(contour_types)
-            weights = np.array(weights)
+            points = np.column_stack([data['x'], data['y'], data['z']])
+            contour_types = data['contour_type']  # already str because of encoding='utf-8'
+            slices = data['sliceID'].astype(int) if 'sliceID' in data.dtype.names else data['frameID'].astype(int)
+            weights = data['weight'].astype(float)
 
         except ValueError:
             print("Wrong file format: {0}".format(filename))
@@ -162,15 +154,12 @@ class GPDataSet(object):
         weights = np.delete(weights, del_index)
 
         self.number_of_slice = len(self.slice_number)  # slice index starting with 0
-        
-        self.sample_contours(points, slices, contour_types, weights, sampling)  # there are
-        # too many
-        # points extracted from cvi files.  To reduce computation time,
-        # the contours points are sampled
+
+        self.sample_contours(points, slices, contour_types, weights, sampling)  
 
         self.number_of_slice = max(self.slice_number) + 1
 
-    def sample_contours(self, points, slices, contour_types, weights, sample):
+    def sample_contours(self, points, slices, contour_types, weights, sample):        
         for j in np.unique(slices):  # For slice i, extract evenly
             # spaced point for all type
             for contour_index, type in enumerate(SAMPLED_CONTOUR_TYPES):
@@ -205,17 +194,17 @@ class GPDataSet(object):
         P = self.points_coordinates
         mitral_index = self.contour_type == ContourType.MITRAL_VALVE
 
-        if np.sum(mitral_index)>0:
-            self.mitral_centroid = P[mitral_index,:].mean(axis=0)
+        if np.sum(mitral_index) > 0:
+            self.mitral_centroid = P[mitral_index, :].mean(axis=0)
         else:
-            logger.error(f"No mitral valve points for this frame! Skipping it")
+            logger.error(f"No mitral valve points for this frame!")
             return False
 
         tricuspid_index = self.contour_type == ContourType.TRICUSPID_VALVE
-        if np.sum(tricuspid_index)>0:
+        if np.sum(tricuspid_index) > 0:
             self.tricuspid_centroid = P[tricuspid_index, :].mean(axis=0)
         else:
-            logger.error(f"No tricuspid valve points for this frame! Skipping it")
+            logger.error(f"No tricuspid valve points for this frame!")
             return False
 
         aorta_contour_index = self.contour_type == ContourType.AORTA_VALVE
@@ -236,10 +225,11 @@ class GPDataSet(object):
             else:
                 self.apex = self.apex[0, :]
         else:
-            logger.error(f"No apex points for this frame! Skipping it")
+            logger.error(f"No apex points for this frame!")
             return False
         
         return True
+
     @staticmethod
     def convert_contour_types(contours):
         "add by A.Mira on 01/2020"
@@ -280,19 +270,14 @@ class GPDataSet(object):
             # For each slice, find centroid cloud point RV_FREEWALL
             # Get contour points
 
-            valid_index = ([x in valid_contours[:2] for x in self.contour_type]) * (
-                self.slice_number == i
-            )
+            valid_index = ([x in valid_contours[:2] for x in self.contour_type]) * (self.slice_number == i)
             points_slice = self.points_coordinates[valid_index, :]
 
             if len(points_slice) > 0:
                 slice_centroid = points_slice.mean(axis=0)
                 contour_index = 0
             else:
-                points_slice = self.points_coordinates[
-                    (self.contour_type == valid_contours[2]) & (self.slice_number == i),
-                    :,
-                ]
+                points_slice = self.points_coordinates[(self.contour_type == valid_contours[2]) & (self.slice_number == i),:,]
                 if len(points_slice) > 0:
                     slice_centroid = points_slice.mean(axis=0)
                     contour_index = 1
@@ -314,9 +299,7 @@ class GPDataSet(object):
                         ]
                     ),
                 )
-                rv_epi.append(
-                    np.asarray([new_position[0], new_position[1], new_position[2]])
-                )
+                rv_epi.append(np.asarray([new_position[0], new_position[1], new_position[2]]))
                 rv_epi_slice.append(i)
                 rv_epi_contour.append(epi_contours[contour_index])
 
@@ -353,18 +336,18 @@ class GPDataSet(object):
 
         try:
             index_im_position = (
-                np.where(["ImagePositionPatient" in x for x in lines[0]])[0][0] + 1
+                    np.where(["ImagePositionPatient" in x for x in lines[0]])[0][0] + 1
             )
             index_im_orientation = (
-                np.where(["ImageOrientationPatient" in x for x in lines[0]])[0][0] + 1
+                    np.where(["ImageOrientationPatient" in x for x in lines[0]])[0][0] + 1
             )
             index_image_id = (
-                np.where([("sliceID" in x) or ("frameID" in x) for x in lines[0]])[0][0] + 1
+                    np.where([("sliceID" in x) or ("frameID" in x) for x in lines[0]])[0][0] + 1
             )
 
             # keeping frameID here for backward compatibility
             index_pixel_spacing = (
-                np.where(["PixelSpacing" in x for x in lines[0]])[0][0] + 1
+                    np.where(["PixelSpacing" in x for x in lines[0]])[0][0] + 1
             )
         except:
             index_im_position = 5
@@ -372,21 +355,18 @@ class GPDataSet(object):
             index_pixel_spacing = 16
             index_image_id = 3
         # lines = lines[1:]
-
         self.contoured_slices = np.unique(self.slice_number)
 
-        # slices_to_use = [int(line[index_image_id]) -1 for line in lines]
-        slices_to_use = [num for num,line in enumerate(lines) if line[index_image_id].isdigit()]
-        
+        slices_to_use = [int(line[index_image_id]) - 1 for line in lines]
         all_positions = []
-        for i in slices_to_use:
-            slice_id = int(lines[i][index_image_id])
-            position = np.array(lines[i][index_im_position : index_im_position + 3]).astype(float)
+        for idx, id in enumerate(slices_to_use):
+            slice_id = int(lines[idx][index_image_id])
+            position = np.array(lines[idx][index_im_position: index_im_position + 3]).astype(float)
             all_positions.append(position)
-            orientation = np.array(lines[i][index_im_orientation : index_im_orientation + 6]).astype(float)
+            orientation = np.array(lines[idx][index_im_orientation: index_im_orientation + 6]).astype(float)
 
             spacing = np.array(
-                lines[i][index_pixel_spacing : index_pixel_spacing + 2]
+                lines[idx][index_pixel_spacing: index_pixel_spacing + 2]
             ).astype(float)
 
             new_slice = Slice(
@@ -420,64 +400,6 @@ class GPDataSet(object):
             self.weights = np.hstack((self.weights, weights))
         else:
             print("In add_data_point input vectors should have the same lenght")
-
-    def identify_mitral_valve_points(self):
-        """This function matches each Mitral valve point with the LAX slice it
-        was  extracted
-        from.
-            Input:
-                None
-            Output:
-                None. slice_number for each Mitral valve point is changed to
-                the corresponding LAX slice number
-        """
-
-        mitral_points = self.points_coordinates[
-            (self.contour_type == ContourType.MITRAL_VALVE), :
-        ]
-        # Extraction code extracts BP points' slice as -1
-        idx = self.contour_type == ContourType.MITRAL_VALVE
-
-        new_mitral_points = np.zeros((len(mitral_points), 3))
-        corresponding_slice = []
-        it = 0
-        for slice_id in np.unique(self.slice_number):
-            LAX = self.points_coordinates[
-                (self.contour_type == ContourType.LAX_LA)
-                & (self.slice_number == slice_id),
-                :,
-            ]
-            if len(LAX) > 0:
-                minimum = 100
-                Corr = np.zeros((len(mitral_points), 1))
-                NP = np.zeros((len(mitral_points), 3))
-                Sl = np.zeros((len(mitral_points), 1))
-                # Find corresponding BP on this slices - should be two
-
-                for points in range(len(mitral_points)):
-                    i = (np.square(mitral_points[points, :] - LAX)).sum(1).argmin()
-                    Corr[points] = np.linalg.norm(LAX[i, :] - mitral_points[points, :])
-                    NP[points] = LAX[i, :]
-                    Sl[points] = slice_id
-
-                index = Corr.argmin()
-                new_mitral_points[it, :] = NP[index, :]
-                corresponding_slice.append(float(Sl[index]))
-
-                NP = np.delete(NP, index, 0)
-                Sl = np.delete(Sl, index, 0)
-                Corr = np.delete(Corr, index, 0)
-                it = it + 1
-
-                index = Corr.argmin()
-                new_mitral_points[it, :] = NP[index, :]
-                corresponding_slice.append(float(Sl[index]))
-                it = it + 1
-
-        indexes = np.where((self.contour_type == ContourType.MITRAL_VALVE))
-        self.points_coordinates[indexes] = new_mitral_points
-        self.contour_type[indexes] = [ContourType.MITRAL_VALVE] * len(new_mitral_points)
-        self.slice_number[indexes] = corresponding_slice
 
     def create_valve_phantom_points(self, n, contour_type):
         """This function creates mitral phantom points by fitting a circle to the mitral points
@@ -520,9 +442,7 @@ class GPDataSet(object):
         # Coordinates of the 3D points
         P = np.array(valve_points)
 
-        distance = [
-            np.linalg.norm(P[i] - P[j]) for i in range(len(P)) for j in range(len(P))
-        ]
+        distance = [np.linalg.norm(P[i] - P[j]) for i in range(len(P)) for j in range(len(P))]
 
         # if max(distance) < 5:
         if len(distance) == 0:  # (from RB's version)
@@ -769,7 +689,7 @@ class GPDataSet(object):
 
         if ContourType.LAX_LV_EPICARDIAL not in self.contour_type:
             my_logger.warning("LAX_LV_EPICARDIAL contour is missing. Slice shift have not been "
-                "corrected")
+                              "corrected")
             return [], []
 
         stopping_criterion = 5
@@ -780,15 +700,13 @@ class GPDataSet(object):
         iteration_num = 1
 
         while stopping_criterion > 1 and iteration_num < 50:
-            # print('iteration',iteration_num )
+            # print('iteration: ',iteration_num )
             nb_translations = 0
-            np_slices = np.unique(self.slice_number)
-
             int_t = []
-
             for index, id in enumerate(self.slices.keys()):
+                # print('index: ', index)
                 t = self._get_slice_shift_sinclair(id, iteration_num, fix_lax)
-                position[index, :] = self.slices[id].position # there should always be a non-zerosposition
+                position[index, :] = self.slices[id].position  # there should always be a non-zerosposition
                 if not (t is None):
                     nb_translations += 1
                     int_t.append(np.linalg.norm(t))
@@ -796,16 +714,10 @@ class GPDataSet(object):
                     translation[index, :] = translation[index, :] + t
 
                     # the translation is done in 2D
-                    point_2_translate = self.points_coordinates[
-                        self.slice_number == id, :
-                    ]
-                    transformation = self.get_affine_matrix_from_metadata(
-                        id, scaling=False
-                    )
+                    point_2_translate = self.points_coordinates[self.slice_number == id, :]
+                    transformation = self.get_affine_matrix_from_metadata(id, scaling=False)
                     # the translation is done in 2D
-                    P2D_LV = tools.apply_affine_to_points(
-                        np.linalg.inv(transformation), point_2_translate
-                    )[:, :2]
+                    P2D_LV = tools.apply_affine_to_points(np.linalg.inv(transformation), point_2_translate)[:, :2]
                     LV = P2D_LV + t
 
                     # Back to 3D
@@ -824,89 +736,135 @@ class GPDataSet(object):
 
         return translation, position
 
-    def get_unintersected_slices(self):
-        ## find redundant slices. by Lee
+    def get_unintersected_slices_fast(self):
+        # Early exit if no points
+        if self.points_coordinates.size == 0:
+            return (np.zeros(0, dtype=getattr(self.slice_number, "dtype", np.int64)),
+                    np.zeros(self.contour_type.shape, dtype=bool))
 
-        lax_registered_contours = [
+        lax_registered_contours = (
             ContourType.LAX_LV_ENDOCARDIAL,
             ContourType.LAX_RV_FREEWALL,
             ContourType.LAX_RV_SEPTUM,
             ContourType.LAX_LV_EPICARDIAL,
-        ]
+            ContourType.LAX_RV_EPICARDIAL,
+        )
 
-        np_slices = np.unique(self.slice_number)
+        lax_slice_idx = np.isin(self.contour_type, lax_registered_contours)
+        lax_slice_ids = np.unique(self.slice_number[lax_slice_idx])
+        if lax_slice_ids.size < 2:
+            # Cannot determine unintersected slices with fewer than 2 LAX slices -- if only 1 then it will 'fail' to intersect with itself
+            return [], np.ones(self.contour_type.shape, dtype=bool)
+
+        # Optional: simple cache to avoid recomputing intersections within this call
+        intersect_cache = {}
+
+        def has_intersection(contour, slice_id):
+            key = (contour, slice_id)
+            pts = intersect_cache.get(key)
+            if pts is None:
+                pts = self.get_slice_intersection_points(contour, slice_id)
+                intersect_cache[key] = pts
+            return len(pts) != 0
 
         redundant_slices = []
-        for index, slice_id in enumerate(np_slices):
-            zero_count = 0
-            for c_indx, contour in enumerate(lax_registered_contours):
-                contour_intersect_points = self.get_slice_intersection_points(
-                    contour, slice_id
-                )
-                if len(contour_intersect_points) == 0:
-                    zero_count += 1
 
-            if zero_count == len(lax_registered_contours): # none of the LAX are intersecting with this SAX
+        for slice_id in np.unique(self.slice_number):
+            # If ANY LAX contour intersects, slice is NOT redundant -> short-circuit
+            for contour in lax_registered_contours:
+                if has_intersection(contour, slice_id):
+                    break
+            else:
+                # No contour intersected this slice
                 redundant_slices.append(slice_id)
 
-        if len(self.points_coordinates) == 0:
-            return np.zeros(0), np.zeros(0)
-
-        valid_index = np.ones(self.contour_type.shape, dtype=bool)
-        for i in redundant_slices:
-            valid_index = valid_index * (self.slice_number != i)
-
-        # remove unintersected sax slices (based on LAX contours),
-        #self.points_coordinates = self.points_coordinates[valid_index]
-        #self.contour_type = self.contour_type[valid_index]
-        #self.slice_number = self.slice_number[valid_index]
-        #self.weights = self.weights[valid_index]
-
-        self.weights[~valid_index] = 0.0
-        self.contour_type[~valid_index] = ContourType.EXCLUDED
+        redundant_slices = np.asarray(redundant_slices)
+        if redundant_slices.size:
+            # Valid indices are those whose slice_number is NOT in redundant set
+            valid_index = ~np.isin(self.slice_number, redundant_slices)
+            self.weights[~valid_index] = 0.0
+            self.contour_type[~valid_index] = ContourType.EXCLUDED
+            slices_excluded = np.unique(self.slice_number[~valid_index])
+            for s in slices_excluded:
+                logger.info(f"Excluding unintersected slice {s}")
+        else:
+            valid_index = np.ones(self.slice_number.shape, dtype=bool)
 
         return redundant_slices, valid_index
 
-    def get_unintersected_slices_RV(self):
-        ## find redundant slices. by Lee
+    # def get_unintersected_slices(self):
+    #     ## find redundant slices. by Lee
 
-        sax_registered_contours = [
-            ContourType.SAX_RV_FREEWALL,
-            ContourType.SAX_RV_SEPTUM,
-            ContourType.SAX_RV_OUTLET,
-        ]
+    #     lax_registered_contours = [
+    #         ContourType.LAX_LV_ENDOCARDIAL,
+    #         ContourType.LAX_RV_FREEWALL,
+    #         ContourType.LAX_RV_SEPTUM,
+    #         ContourType.LAX_LV_EPICARDIAL,
+    #     ]
 
-        lax_registered_contours = ContourType.LAX_RV_SEPTUM
+    #     np_slices = np.unique(self.slice_number)
 
-        np_slices = np.unique(self.slice_number)
-        redundant_slices = []
-        for index, id in enumerate(np_slices):
-            contour_intersect_points = self.get_slice_intersection_points(
-                lax_registered_contours, id
-            )
-            if len(contour_intersect_points) == 0:
-                redundant_slices.append(id)
+    #     redundant_slices = []
+    #     for index, slice_id in enumerate(np_slices):
+    #         zero_count = 0
+    #         for c_indx, contour in enumerate(lax_registered_contours):
+    #             contour_intersect_points = self.get_slice_intersection_points(contour, slice_id)
+    #             if len(contour_intersect_points) == 0:
+    #                 zero_count += 1
 
-        if len(self.points_coordinates) == 0:
-            return np.zeros(0), np.zeros(0)
+    #         if zero_count == len(lax_registered_contours):  # none of the LAX are intersecting with this SAX
+    #             redundant_slices.append(slice_id)
 
-        invalid_index = np.ones(self.contour_type.shape, dtype=bool)
-        for i in redundant_slices:
-            for c_indx, contour in enumerate(sax_registered_contours):
-                invalid_index = (
-                    invalid_index
-                    * (self.contour_type == contour)
-                    * (self.slice_number == i)
-                )
-        valid_index = ~invalid_index
+    #     if len(self.points_coordinates) == 0:
+    #         return np.zeros(0), np.zeros(0)
 
-        # remove unintersected sax slices (based on LAX contours),
-        self.points_coordinates = self.points_coordinates[valid_index]
-        self.contour_type = self.contour_type[valid_index]
-        self.slice_number = self.slice_number[valid_index]
-        self.weights = self.weights[valid_index]
+    #     valid_index = np.ones(self.contour_type.shape, dtype=bool)
+    #     for i in redundant_slices:
+    #         valid_index = valid_index * (self.slice_number != i)
 
-        return redundant_slices, valid_index
+    #     self.weights[~valid_index] = 0.0
+    #     self.contour_type[~valid_index] = ContourType.EXCLUDED
+
+    #     return redundant_slices, valid_index
+
+    # def get_unintersected_slices_RV(self):
+    #     ## find redundant slices. by Lee
+
+    #     sax_registered_contours = [
+    #         ContourType.SAX_RV_FREEWALL,
+    #         ContourType.SAX_RV_SEPTUM,
+    #         ContourType.SAX_RV_OUTLET,
+    #     ]
+
+    #     lax_registered_contours = ContourType.LAX_RV_SEPTUM
+
+    #     np_slices = np.unique(self.slice_number)
+    #     redundant_slices = []
+    #     for index, id in enumerate(np_slices):
+    #         contour_intersect_points = self.get_slice_intersection_points(lax_registered_contours, id)
+    #         if len(contour_intersect_points) == 0:
+    #             redundant_slices.append(id)
+
+    #     if len(self.points_coordinates) == 0:
+    #         return np.zeros(0), np.zeros(0)
+
+    #     invalid_index = np.ones(self.contour_type.shape, dtype=bool)
+    #     for i in redundant_slices:
+    #         for c_indx, contour in enumerate(sax_registered_contours):
+    #             invalid_index = (
+    #                     invalid_index
+    #                     * (self.contour_type == contour)
+    #                     * (self.slice_number == i)
+    #             )
+    #     valid_index = ~invalid_index
+
+    #     # remove unintersected sax slices (based on LAX contours),
+    #     self.points_coordinates = self.points_coordinates[valid_index]
+    #     self.contour_type = self.contour_type[valid_index]
+    #     self.slice_number = self.slice_number[valid_index]
+    #     self.weights = self.weights[valid_index]
+
+    #     return redundant_slices, valid_index
 
     # @profile
     def _get_slice_shift_sinclair(self, slice_number, iter, fix_LAX=False):
@@ -956,12 +914,9 @@ class GPDataSet(object):
 
         for c_indx, contour in enumerate(sax_registered_contours):
             # -----LDT: check if selected contour is in my GPFile
-            valid_index = (self.contour_type == contour) & (
-                self.slice_number == slice_number
-            )
+            valid_index = (self.contour_type == contour) & (self.slice_number == slice_number)
 
             ref_ctype = contour
-
             if np.any(valid_index):
                 # if the contours is a SAX contours the intersecting contour,
                 # if found, is in LAX contours
@@ -977,15 +932,12 @@ class GPDataSet(object):
             # with the intersecting SAX contours
             else:
                 if not fix_LAX:
-                    valid_index = (
-                        self.contour_type == lax_registered_contours[c_indx]
-                    ) & (self.slice_number == slice_number)
+                    valid_index = ((self.contour_type == lax_registered_contours[c_indx]) &
+                                   (self.slice_number == slice_number))
                     ref_ctype = lax_registered_contours[c_indx]
                     if np.any(valid_index):
                         contour_points_ref = self.points_coordinates[valid_index, :]
-
                         intersecting_contour = sax_registered_contours[c_indx]
-
                     else:
                         continue
                 else:
@@ -994,51 +946,17 @@ class GPDataSet(object):
             # Compute contours intersection with  Dicom slice i.
             # -----LDT: return intersection points of the contour of  "#slice_number"
             # -----LDT: with the contours from  any  other slice in the stack.
-            contour_intersect_points = self.get_slice_intersection_points(
-                intersecting_contour, slice_number
-            )
-
-            """
-            # -----LDT: plot figure of the points
-            
-            #if iter == 2:
-                
-            fig = plt.figure(figsize=(10, 10))
-            ax = plt.axes(projection='3d')
-            ax.scatter3D(*zip(*contour_points_ref), cmap = 'xkcd:orange', label = "contour_points_ref")
-
-            if len(contour_intersect_points) >=1:
-                    ax.scatter3D(*zip(*contour_intersect_points), label = "contour intersect points")
-
-            else:
-                    pass
-
-            #if (slice_number == 192) & (contour == ContourType.SAX_LV_EPICARDIAL):
-                #print('contour_intersect_points', contour_intersect_points)
-            
-            ax.legend()
-            ax.set_title('inters. points = '+str(len(contour_intersect_points)))
-            plt.savefig('./results/Slice'+ str(slice_number)+'_it'+str(
-                        iter)+'_'+str(ref_ctype )[12:]+'.png')
-                
-            #print('----- ref_contour: ', ref_ctype , len(contour_intersect_points))
-            """
+            contour_intersect_points = self.get_slice_intersection_points(intersecting_contour, slice_number)
 
             if not (len(contour_intersect_points) == 0):
                 # LDT: apply affine matrix to 3D points, only in-plane transformation is considered
                 # LDT: tansformation is applied both to the reference contour points and to the intersecting contour points
                 intersection_points_2d.append(
-                    tools.apply_affine_to_points(
-                        origin_transformation, contour_intersect_points
-                    )[:, :2]
+                    tools.apply_affine_to_points(origin_transformation, contour_intersect_points)[:, :2]
                 )
 
                 p2_reference.append(
-                    list(
-                        tools.apply_affine_to_points(
-                            origin_transformation, contour_points_ref
-                        )[:, :2]
-                    )
+                    list(tools.apply_affine_to_points(origin_transformation, contour_points_ref)[:, :2])
                 )
                 weights.append(1)
 
@@ -1048,13 +966,12 @@ class GPDataSet(object):
         t = np.array([0, 0])
 
         if len(intersection_points_2d) > 0:
-            if not (
-                len(intersection_points_2d) == 1 and len(intersection_points_2d[0]) == 1
-            ):
+            if not (len(intersection_points_2d) == 1 and len(intersection_points_2d[0]) == 1):
                 # compute the optimal translation between two sets of grouped points
-                t = -tools.register_group_points_translation_only(
-                    intersection_points_2d, p2_reference, slice_number, norm=1
-                )
+                t = -tools.register_group_points_translation_only(intersection_points_2d,
+                                                                  p2_reference,
+                                                                  slice_number,
+                                                                  norm=1)
 
         return t
 
@@ -1071,36 +988,29 @@ class GPDataSet(object):
         intersection_points = np.empty((0, 3))
         slices = [x for x in np.unique(self.slice_number) if x != slice_number]
         for j in slices:
-            j_valid_index = (self.contour_type == contour) * (self.slice_number == j)
+            j_valid_index = (self.contour_type == contour) & (self.slice_number == j)
 
             if np.sum(j_valid_index) > 2:
-                lv_epi = self.points_coordinates[j_valid_index, :]
-                _, lv_epi = tools.sort_consecutive_points(lv_epi)
-
+                pts = self.points_coordinates[j_valid_index, :]
+                _, pts = tools.sort_consecutive_points(pts)
             else:
                 continue
 
-            for o in range(len(lv_epi) - 1):
-                #  some contour are not closed contours
-                # like ethe free wall
-                # therefore if the points are too fat we need to exclude them
+            for o in range(len(pts) - 1):
+                # some contour are not closed contours like the free wall
+                # therefore if the points are too far apart we need to exclude them
                 P = []
-                if np.linalg.norm(lv_epi[o + 1] - lv_epi[o - 1]) < 10:
+                if np.linalg.norm(pts[o + 1] - pts[o - 1]) < 10:
                     P = tools.LineIntersection(
                         self.slices[slice_number].position,
                         self.slices[slice_number].orientation,
-                        lv_epi[o, :],
-                        lv_epi[o + 1, :],
+                        pts[o, :],
+                        pts[o + 1, :],
                     )
 
-                # if 192 not in slices:
-                # print('P', P)
                 # check the condition to have an intersection + the
                 # intersection point is in between the two defined points
-                if (
-                    len(P) > 0
-                    and np.dot(P.T - lv_epi[o, :], P.T - lv_epi[o + 1, :]) < 0
-                ):
+                if (len(P) > 0 and np.dot(P.T - pts[o, :], P.T - pts[o + 1, :]) < 0):
                     intersection_points = np.vstack((intersection_points, P))
 
         return intersection_points
@@ -1118,6 +1028,70 @@ class GPDataSet(object):
         T = self.slices[slice_num].get_affine_matrix(scaling=scaling)
 
         return T
+
+    def apply_slice_shift_fast(self, slices_translation, position, slice_uids=None):
+        """
+        Apply 2D per-slice translations (breath-hold correction) to self.points_coordinates.
+        """
+        # Normalize inputs
+        if slice_uids is None:
+            # If not provided, operate on all known slice IDs (but still avoid scanning all slices)
+            slice_uids = list(self.slices.keys())
+        elif not isinstance(slice_uids, list):
+            slice_uids = [slice_uids]
+
+        # Precompute (and reuse) transforms per slice
+        T_cache = {}
+
+        # Fast local access
+        points = self.points_coordinates
+        slice_numbers = self.slice_number
+        contoured = self.contoured_slices  # assume this is a set for O(1) lookup
+
+        # Iterate only over the slices we intend to modify
+        for idx, (uid, trans2d, pos_ref) in enumerate(zip(slice_uids, slices_translation, position)):
+            sl = self.slices.get(uid, None)
+            if sl is None:
+                continue  # unknown uid, skip
+
+            # Skip if this slice isn't contoured or if position doesn't match
+            # (One allclose per target slice instead of per slice×per translation)
+            if (uid not in contoured) or (not np.allclose(sl.position, pos_ref)):
+                continue
+
+            # Boolean mask for the points belonging to this slice
+            mask = (slice_numbers == uid)
+            if not np.any(mask):
+                continue
+
+            # Get (and cache) transforms
+            T = T_cache.get(uid)
+            if T is None:
+                T = self.get_affine_matrix_from_metadata(uid, scaling=False)
+                T_cache[uid] = T
+
+            # View of the points to update (avoid extra copies)
+            pts3 = points[mask, :]  # shape (N, 3)
+
+            # 3D -> 2D via inverse affine
+            # tools.apply_affine_to_points expects (N,3); returns (N,3). We only need first 2 cols.
+            P2D = tools.apply_affine_to_points(np.linalg.inv(T), pts3)[:, :2]
+            sl2D = tools.apply_affine_to_points(np.linalg.inv(T), np.array(sl.position).reshape(1, 3))[:, :2] # also transform slice position for consistency
+
+            # In-place 2D shift
+            # Ensure trans2d is shape (2,) or (1,2) so broadcasting is cheap
+            P2D += trans2d
+            sl2D += trans2d 
+
+            # Back to 3D: reuse buffer, avoid zeros allocation with column_stack (cheap view-like join)
+            P3_temp = np.column_stack((P2D, np.zeros((P2D.shape[0],), dtype=P2D.dtype)))
+            sl3_temp = np.column_stack((sl2D, np.zeros((sl2D.shape[0],), dtype=sl2D.dtype)))
+
+            # 2D→3D via forward affine, then write back in-place
+            pts3_new = tools.apply_affine_to_points(T, P3_temp)
+            sl_pos_new = tools.apply_affine_to_points(T, sl3_temp)
+            points[mask, :] = pts3_new
+            self.slices[uid].position = sl_pos_new.flatten().tolist()  # update slice position too
 
     def apply_slice_shift(self, slices_translation, position, slice_uids=None):
         """This function applies 2D translations from breath-hold
@@ -1155,18 +1129,12 @@ class GPDataSet(object):
                     continue
 
                 slice_uid = slice.image_id
-                slice_points = self.points_coordinates[
-                    (self.slice_number == slice_uid), :
-                ]
+                slice_points = self.points_coordinates[(self.slice_number == slice_uid), :]
                 if len(slice_points) > 0:
                     # Get 2D points
-                    transformation = self.get_affine_matrix_from_metadata(
-                        slice_uid, scaling=False
-                    )
+                    transformation = self.get_affine_matrix_from_metadata(slice_uid, scaling=False)
                     # the translation is done in 2D
-                    P2D_LV = tools.apply_affine_to_points(
-                        np.linalg.inv(transformation), slice_points
-                    )[:, :2]
+                    P2D_LV = tools.apply_affine_to_points(np.linalg.inv(transformation), slice_points)[:, :2]
 
                 P2D_LV = P2D_LV + translation
 
@@ -1178,102 +1146,6 @@ class GPDataSet(object):
                 indexes = np.where((self.slice_number == slice_uid))
 
                 self.points_coordinates[indexes, :] = P3_LV
-
-    def stiff_model_slice_shifting(self, model):
-        """Performs breath-hold misregistration correction when the dataset
-        does not contain any LAX slices
-        a stiff linear least squares fit of the LV_ENDOCARDIAL with D-Affine
-        regularisation should be performed to align a 3D LV_ENDOCARDIAL model with the long
-        axis (defined by mitral point, apex and tricuspid points) slices.
-        By using a very stiff fit, the overall shape is preserved.
-        Intersections between the 3D model and the 2D SAX slices are
-        then calculated and the 2D short axis (SAX)
-            slices are aligned with the intersection contours.
-               Input: biventricular model
-               Output: 2D Translations, position (3D)"""
-
-        translation = np.zeros((len(self.slices.keys()), 2))  # 2D translation
-        position = np.zeros((len(self.slices.keys()), 3))
-        visited_slices = []
-        # Calculate intersection
-        # -----------------------
-        np_slices = np.unique(self.slice_number)
-
-        for index, id in enumerate(np_slices):
-            # this loop will search to compute, first a displacement based on
-            # the distance between the centroid of the edocardial points
-            # corresponding to the slice, and the centroid of the intersection
-            # points bw endocardial surface(model) and the slice plane.
-            # if there are no intersection points. The centroid will be
-            # aligned with the centroid of the closest slice
-            active_slice = id
-            slices_subset = list(self.slices.keys())
-
-            while id not in visited_slices or len(slices_subset) == 0:
-                # Get all the points on the slice i
-                # ----------------------------------
-                lv_edo_points = self.points_coordinates[
-                    (self.contour_type == ContourType.SAX_LV_ENDOCARDIAL)
-                    & (self.slice_number == active_slice),
-                    :,
-                ]
-                # Check if there is an endocardial contour for the slice i.
-                # -----------------------------------------------------------
-                if len(lv_edo_points) == 0:
-                    visited_slices.append(id)
-                    continue
-
-                # Get the transformation from 2D to 3D
-                # ----------------------------------------
-                transformation = self.get_affine_matrix_from_metadata(
-                    active_slice, scaling=False
-                )
-                P2_LV = tools.apply_affine_to_points(
-                    np.linalg.inv(transformation), lv_edo_points
-                )[:, :2]
-                # Give the intersection of the LV_ENDOCARDIAL with the slices
-                # -----------------------------------------------
-                intersection_surface = model.get_intersection_with_dicom_image(
-                    self.slices[active_slice]
-                )
-
-                # If intersection
-                if len(intersection_surface) > 0:
-                    # go back to the dicom coordinates system
-                    intersection_surface_2D = tools.apply_affine_to_points(
-                        np.linalg.inv(transformation), intersection_surface
-                    )[:, :2]
-                    centroid_model = tools.compute_area_weighted_centroid(
-                        intersection_surface_2D
-                    )
-
-                    # Get centroid
-                    centroid_LV_Data = P2_LV.mean(axis=0)
-                    displacement = centroid_model - centroid_LV_Data
-                    translation[index, :] = translation[index, :] + displacement
-                    position[index, :] = self.slices[active_slice].position
-                    visited_slices.append(id)
-
-                    # Get all points slice
-                    slice_points = self.points_coordinates[(self.slice_number == id), :]
-                    points_2D = tools.apply_affine_to_points(
-                        np.linalg.inv(transformation), slice_points
-                    )[:, :2]
-                    points_2D = points_2D + displacement
-
-                    # Back to 3D
-                    slice_points = np.zeros((len(points_2D), 3))
-                    slice_points[:, :2] = points_2D
-                    slice_points = tools.apply_affine_to_points(
-                        transformation, slice_points
-                    )
-                    indexes = np.where(self.slice_number == id)
-                    self.points_coordinates[indexes] = slice_points
-                else:
-                    slices_subset.remove(id)
-                    active_slice = self.get_slice_neighbour(id, slices_subset)
-
-        return translation, position
 
     def combined_slice_shifting(self, model, fix_LA=False):
         """This method does a breath-hold misregistration correction for both LAX
@@ -1292,9 +1164,7 @@ class GPDataSet(object):
         """
 
         if ContourType.LAX_LV_EPICARDIAL not in self.contour_type:
-            warnings.warn(
-                "LA contour is missing. Slice shift have not been " "corrected"
-            )
+            warnings.warn("LA contour is missing. Slice shift have not been " "corrected")
             return [], []
         tol = 5  # The stoping_criterion is the residual translation
         # read the slice number corresponding to each slice
@@ -1316,15 +1186,11 @@ class GPDataSet(object):
                     position[index, :] = self.slices[id].position
                     # the translation is done in 2D
                     point_2_translate = self.points_coordinates[
-                        self.slice_number == id, :
-                    ]
-                    transformation = self.get_affine_matrix_from_metadata(
-                        id, scaling=False
-                    )
+                                        self.slice_number == id, :
+                                        ]
+                    transformation = self.get_affine_matrix_from_metadata(id, scaling=False)
                     # the translation is done in 2D
-                    P2D_LV = tools.apply_affine_to_points(
-                        np.linalg.inv(transformation), point_2_translate
-                    )[:, :2]
+                    P2D_LV = tools.apply_affine_to_points(np.linalg.inv(transformation), point_2_translate)[:, :2]
                     LV = P2D_LV + t
 
                     # Back to 3D
@@ -1394,7 +1260,7 @@ class GPDataSet(object):
         # into the LAX LV endocardial contours and the LV endocardial surface of the model
         for c_indx, contour in enumerate(sax_registered_contours):
             valid_index = (self.contour_type == contour) & (
-                self.slice_number == slice_number
+                    self.slice_number == slice_number
             )
 
             if np.any(valid_index):
@@ -1409,8 +1275,8 @@ class GPDataSet(object):
             else:
                 if not fix_LA:
                     valid_index = (
-                        self.contour_type == lax_registered_contours[c_indx]
-                    ) & (self.slice_number == slice_number)
+                                          self.contour_type == lax_registered_contours[c_indx]
+                                  ) & (self.slice_number == slice_number)
                     if np.any(valid_index):
                         contour_points_ref = self.points_coordinates[valid_index, :]
 
@@ -1434,52 +1300,33 @@ class GPDataSet(object):
 
                 # Compute intersection with model
                 model_intersection_lv = model_intersection_lv + list(
-                    model.get_intersection_with_dicom_image(
-                        self.slices[slice_number], [associated_surface[c_indx]]
-                    )
+                    model.get_intersection_with_dicom_image(self.slices[slice_number], [associated_surface[c_indx]])
                 )
 
             if not (len(contour_intersect_points) == 0):
                 # The transformationis done in 2D is
                 intersection_points_2d.append(
-                    tools.apply_affine_to_points(
-                        origin_transformation, contour_intersect_points
-                    )[:, :2]
+                    tools.apply_affine_to_points(origin_transformation, contour_intersect_points)[:, :2]
                 )
                 p2_reference.append(
-                    list(
-                        tools.apply_affine_to_points(
-                            origin_transformation, contour_points_ref
-                        )[:, :2]
-                    )
+                    list(tools.apply_affine_to_points(origin_transformation, contour_points_ref)[:, :2])
                 )
                 weights.append(1)
 
         nb_groups = len(intersection_points_2d)
         if len(model_intersection_lv) > 0 and len(data_points_lv) > 0:
             # exclude centroid if the intersection with the model is an open contour
-            _, model_intersection_lv = tools.sort_consecutive_points(
-                model_intersection_lv
-            )
+            _, model_intersection_lv = tools.sort_consecutive_points(model_intersection_lv)
             inter_distance = np.sum(
-                np.abs(
-                    model_intersection_lv - np.roll(model_intersection_lv, 1, axis=0)
-                )
-                ** 2,
-                axis=1,
-            ) ** (1.0 / 2)
+                np.abs(model_intersection_lv - np.roll(model_intersection_lv, 1, axis=0))** 2,axis=1,) ** (1.0 / 2)
             # if open contour then max(inte_distamce) > 10
             if max(inter_distance) < 10:
                 # add centroid of LV endo as intersection with the model and the
                 # the LV endo centroid from data as a group to be registered
-                model_intersection_2d = tools.apply_affine_to_points(
-                    origin_transformation, model_intersection_lv
-                )[:, :2]
+                model_intersection_2d = tools.apply_affine_to_points(origin_transformation, model_intersection_lv)[:, :2]
                 model_2d_centroid = np.mean(model_intersection_2d, axis=0)
 
-                data_points_lv_2d = tools.apply_affine_to_points(
-                    origin_transformation, data_points_lv
-                )[:, :2]
+                data_points_lv_2d = tools.apply_affine_to_points(origin_transformation, data_points_lv)[:, :2]
                 data_2D_centroid = np.mean(data_points_lv_2d, axis=0)
                 if nb_groups == 0:
                     weights.append(1)
@@ -1494,9 +1341,7 @@ class GPDataSet(object):
         # performed
         nb_points = np.sum([len(p) > 1 for p in intersection_points_2d])
         if len(intersection_points_2d) > 0:
-            if not (
-                len(intersection_points_2d) == 1 and len(intersection_points_2d[0]) == 1
-            ):
+            if not (len(intersection_points_2d) == 1 and len(intersection_points_2d[0]) == 1):
                 t = -tools.register_group_points_translation_only(
                     intersection_points_2d,
                     p2_reference,
@@ -1507,200 +1352,10 @@ class GPDataSet(object):
 
         return t
 
-    def get_slice_neighbour(self, slice_id, slice_subset=[]):
-        if not isinstance(slice_subset, list):
-            slice_subset = [slice_subset]
-        if len(slice_subset) == 0:
-            slice_subset = self.slices.keys()
-
-        pos_z = self.slices[slice_id].position[2]
-        distance = [
-            pos_z - self.slices[new_slice].position[2] for new_slice in slice_subset
-        ]
-        return slice_subset[np.argmin(distance)]
+    def get_frame_num(self) -> int:
+        return self.time_frame
     
-    def clean_MV_3D(self):
-        """
-        Author: Joshua Dillon
-        ----------------------------------------------
-        # Delete the points within the mitral valve plane estimated in 3D space
-
-        """
-
-        mitral_points = self.points_coordinates[
-            self.contour_type == ContourType.MITRAL_VALVE
-        ]
-
-        # LAX contours to delete
-        lax_contours = [
-            ContourType.LAX_LV_ENDOCARDIAL,
-            ContourType.LAX_LV_EPICARDIAL,
-        ]
-
-        del_idx = []
-
-        # Create mv phantom plane
-        self.create_valve_phantom_points(30,ContourType.MITRAL_VALVE)
-        phantom_points = self.points_coordinates[self.contour_type == ContourType.MITRAL_PHANTOM]
-        # Get radius of mitral valve plane as euclidian distance
-        mitral_radii = [np.linalg.norm(point - self.mitral_centroid) for point in phantom_points]
-        mitral_radius = np.mean(mitral_radii)
-
-        # Calculate the normal to the mitral valve plane
-        lv_length = np.linalg.norm(self.mitral_centroid - self.apex)
-        mitral_normal = (self.mitral_centroid - self.apex) / lv_length
-
-
-        # Find LAX points normal to the mitral valve plane
-        for pt_idx, point in enumerate(self.points_coordinates):
-            contour = self.contour_type[pt_idx]
-            sliceid = self.slice_number[pt_idx]
-
-            if contour in lax_contours:
-                point_normal = np.dot(point - self.mitral_centroid, mitral_normal)
-                # Get points tangent to the mitral valve plane
-                point_tangent = point - point_normal * mitral_normal
-                radius = np.linalg.norm(point_tangent - self.mitral_centroid)
-                if radius < mitral_radius and point_normal > 0 and np.abs(point_normal) < lv_length/5:
-                    del_idx.append(pt_idx)
-        
-
-        self.points_coordinates = [
-            k for i, k in enumerate(self.points_coordinates) if i not in del_idx
-        ]
-        self.slice_number = [
-            k for i, k in enumerate(self.slice_number) if i not in del_idx
-        ]
-        self.weights = [k for i, k in enumerate(self.weights) if i not in del_idx]
-        self.contour_type = [
-            k for i, k in enumerate(self.contour_type) if i not in del_idx
-        ]
-
-    def clean_LAX_contour(self):
-        """
-        Author: Anna Mira, Laura Dal Toso
-        ----------------------------------------------
-        # Delete the points from the endocardial contours
-        # between the two valve points
-        # If no time_slice difined, the points will be deleted for all
-        # existent time slices.
-
-        """
-
-        valve_contours = [
-            ContourType.MITRAL_VALVE,
-            ContourType.MITRAL_VALVE,
-            ContourType.TRICUSPID_VALVE,
-            ContourType.TRICUSPID_VALVE,
-            ContourType.TRICUSPID_VALVE,
-            ContourType.AORTA_VALVE,
-        ]
-
-        lax_contours = [
-            ContourType.LAX_LV_ENDOCARDIAL,
-            ContourType.LAX_LV_EPICARDIAL,
-            ContourType.LAX_RV_SEPTUM,
-            ContourType.LAX_RV_FREEWALL,
-            ContourType.LAX_RV_ENDOCARDIAL,
-        ]
-
-        del_idx = []
-
-        for contour in lax_contours:
-            indices = [i for i, c in enumerate(self.contour_type) if c == contour]
-            points = np.array(self.points_coordinates)[indices]
-            for i in range(len(points)):
-                pt_idx = indices[i]
-                point = self.points_coordinates[pt_idx]
-
-                sliceid = self.slice_number[pt_idx]
-                # aorta_points = np.array(self.points_coordinates)[
-                #     (aorta) & (self.slice_number == sliceid)
-                # ]
-                # aorta_points = np.array(self.points_coordinates)[
-                #     (self.contour_type == ContourType.AORTA_VALVE) & (self.slice_number == sliceid)
-                # ]
-
-                # this part deletes the points in between tricuspid valves and mitral valves
-                extent_points = np.array(self.points_coordinates)[
-                    (self.contour_type == valve_contours[lax_contours.index(contour)])
-                    & (self.slice_number == sliceid)
-                ]
-
-                # this part deletes the lax_epicardial points for the 3ch view, as some of them
-                # are wrongly labelled in the BioBank dataset
-                # if len(aorta_points) == 2 and contour == ContourType.LAX_LV_EPICARDIAL:
-                #     del_idx.append(pt_idx)
-
-                if len(extent_points) == 2:
-                    valve_dist = np.linalg.norm(extent_points[1] - extent_points[0])
-                    distance1 = np.linalg.norm(extent_points[1] - point)
-                    distance2 = np.linalg.norm(extent_points[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist - valve_dist) < 3:
-                        del_idx.append(pt_idx)
-
-        self.points_coordinates = [
-            k for i, k in enumerate(self.points_coordinates) if i not in del_idx
-        ]
-        self.slice_number = [
-            k for i, k in enumerate(self.slice_number) if i not in del_idx
-        ]
-        self.weights = [k for i, k in enumerate(self.weights) if i not in del_idx]
-        self.contour_type = [
-            k for i, k in enumerate(self.contour_type) if i not in del_idx
-        ]
-
-    def dist_aorta_to_apex(gpdata):
-        """
-        Author: Laura Dal Toso
-        Date: 22/07/2022
-        -----------------------------
-        Measure distance between aorta valve centroid and apex
-        Input:
-            - GPDataset object containing one time frame
-            - Output: distance bewteen aorta valves centroid and apex
-
-        """
-        aorta_points = gpdata.points_coordinates[
-            gpdata.contour_type == ContourType.AORTA_VALVE
-        ]
-        apex_point = gpdata.points_coordinates[
-            gpdata.contour_type == ContourType.APEX_POINT
-        ]
-
-        if len(aorta_points) == 2 and len(apex_point) == 1:
-            aorta_centroid = aorta_points.mean(axis=0)
-            dist_aorta_apex = np.linalg.norm(aorta_centroid - apex_point)
-
-        return dist_aorta_apex
-
-    def dist_mitral_to_apex(gpdata):
-        """
-        Author: Laura Dal Toso
-        Date: 22/07/2022
-        -----------------------------
-        Measure distance between mitral valve centroid and apex
-        Input:
-            - GPDataset object containing one time frame
-            - Output: distance bewteen mitral valves centroid and apex
-
-        """
-        mitral_points = gpdata.points_coordinates[
-            gpdata.contour_type == ContourType.MITRAL_VALVE
-        ]
-        apex_point = gpdata.points_coordinates[
-            gpdata.contour_type == ContourType.APEX_POINT
-        ]
-
-        if len(mitral_points) >= 2 and len(apex_point) == 1:
-            mitral_centroid = mitral_points.mean(axis=0)
-            dist_mitral_apex = np.linalg.norm(mitral_centroid - apex_point)
-
-        return dist_mitral_apex
-
-    def write_gpfile(self, file_name, time_frame=None):
+    def write_gpfile(self, file_name, time_frame=None, overwrite=True):
         """
         Author: Laura Dal Toso
         Date: 22/07/2022
@@ -1711,14 +1366,40 @@ class GPDataSet(object):
         - time_frame to write
 
         """
+        header = False
+        if overwrite and os.path.exists(file_name):
+            if os.path.exists(file_name):
+                os.remove(file_name)
+                header = True
+        elif not os.path.exists(file_name):
+            header = True
 
         out = open(file_name, "a")
-        for i, element in enumerate(self.points_coordinates):
-            out.write(
-                "{0:.3f}\t{1:.3f}\t{2:.3f}\t".format(element[0], element[1], element[2])
-                + "{0}\t".format(str(self.contour_type[i])[12:])
-                + "{0}\t{1}\t{2}".format(
-                    self.slice_number[i], self.weights[i], time_frame
-                )
-                + "\n"
-            )
+        if header:
+            out.write('x\ty\tz\tcontour type\tsliceID\tweight\ttime frame\n')
+        for i, coord in enumerate(self.points_coordinates):
+            out.write('{:.5f}\t{:.5f}\t{:.5f}\t{}\t{}\t{}\t{}\n'.format(coord[0], coord[1], coord[2], str(self.contour_type[i])[12:], self.slice_number[i], self.weights[i], time_frame))
+
+    def write_sliceinfofile(self, file_name, overwrite=True):
+        if overwrite and os.path.exists(file_name):
+            os.remove(file_name)
+        elif os.path.exists(file_name):
+            return
+
+        out = open(file_name, "a")
+        for slice_id, slice in self.slices.items():
+            imagePositionPatient = slice.position
+            imageOrientationPatient = slice.orientation
+            pixelSpacing = slice.pixel_spacing
+            file = "no_file_name"
+            
+            out.write('{}\t'.format(file))
+            out.write('sliceID: \t')
+            out.write('{}\t'.format(slice_id))
+            out.write('ImagePositionPatient\t')
+            out.write('{}\t{}\t{}\t'.format(imagePositionPatient[0], imagePositionPatient[1], imagePositionPatient[2]))
+            out.write('ImageOrientationPatient\t')
+            out.write('{}\t{}\t{}\t{}\t{}\t{}\t'.format(imageOrientationPatient[0], imageOrientationPatient[1], imageOrientationPatient[2],
+                                                imageOrientationPatient[3], imageOrientationPatient[4], imageOrientationPatient[5]))
+            out.write('PixelSpacing\t')
+            out.write('{}\t{}\n'.format(pixelSpacing[0], pixelSpacing[1]))

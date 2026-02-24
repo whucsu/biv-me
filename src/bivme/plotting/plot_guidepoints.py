@@ -98,10 +98,14 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
                 # Extract the data for the current frame
                 frame_data = img_data[:, :, frame]
 
-
                 if slice_number not in image_grids.keys():
                     # Get slice
-                    current_slice = data_set.slices[slice_number]
+                    try:
+                        current_slice = data_set.slices[slice_number]
+                    except KeyError:
+                        logger.warning(f"Slice number {slice_number} not found in dataset slices. Skipping this slice.")
+                        continue
+
                     S = current_slice.position
                     X = current_slice.orientation[:3]
                     Y = current_slice.orientation[3:]
@@ -167,55 +171,58 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
 
     return image_plots, image_grids
 
-def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", frames_to_fit: list[int]=[], my_logger: logger = logger, model_path = None, image_path = None) -> None:
+def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", frames_to_fit: list[int]=[], my_logger: logger = logger, model_path = None, image_path = None) -> None:
 
-    # extract the patient name from the folder name
-    case = os.path.basename(os.path.normpath(folder))
-    my_logger.info(f"case: {case}")
-
-    filename_info = Path(folder) / f"SliceInfoFile{si_suffix}.txt"
-    if not filename_info.exists():
-        my_logger.error(f"Cannot find {filename_info} file! Skipping this model")
+    si_rule = re.compile(fnmatch.translate(f"*SliceInfoFile{si_suffix}*.txt"), re.IGNORECASE)
+    filename_info = [Path(gp_dir) / Path(name) for name in os.listdir(Path(gp_dir)) if si_rule.match(name)]
+    if len(filename_info) == 0:
+        my_logger.error(f"Cannot find SliceInfoFile! Skipping this case")
         return -1
+    filename_info = filename_info[-1]
 
-    rule = re.compile(fnmatch.translate(f"GPFile_{gp_suffix}*.txt"), re.IGNORECASE)
-    time_frame = [Path(folder) / Path(name) for name in os.listdir(Path(folder)) if rule.match(name)]
-    frame_name = [re.search(r'GPFile_*(\d+)\.txt', str(file), re.IGNORECASE)[1] for file in time_frame]
-    frame_name = sorted(frame_name)
-
+    gp_rule = re.compile(fnmatch.translate(f"*GPFile_{gp_suffix}*.txt"), re.IGNORECASE)
+    gp_files = [name for name in os.listdir(Path(gp_dir)) if gp_rule.match(name)]
+    if len(gp_files) == 0:
+        my_logger.error(f"Cannot find any GPFile with the specified suffix! Skipping this case")
+        return -1
+    
     if len(frames_to_fit) == 0:
-        frames_to_fit = np.unique(
-            frame_name
-        )  # if you want to fit all _frames#
+        frames_to_fit = [int(f.split('_')[-1].replace('.txt','')) for f in gp_files] # fit all the frames available
+    
+    frames_to_fit = sorted(np.unique(frames_to_fit))
 
     # create a separate output folder for each patient
     output_folder = Path(out_dir) / case
     Path(output_folder).mkdir(parents=True, exist_ok=True)
 
     with Progress(transient=True) as progress:
-        task = progress.add_task(f"Processing {len(frames_to_fit)} frames", total=len(frames_to_fit))
-        console = progress
+        task = progress.add_task(f"Generating html plots", total=len(frames_to_fit))
 
         image_grids = {}
 
-        for idx, num in enumerate(sorted(frames_to_fit)):
-            num = int(num)  # frame number
-            filename = Path(folder) / f"GPFile_{gp_suffix}{num:03}.txt"
+        for idx, num in enumerate(frames_to_fit):
+            gp_rule = re.compile(fnmatch.translate(f"*GPFile_{gp_suffix}{num:03d}.txt"), re.IGNORECASE)
+            filename = [Path(gp_dir) / name for name in os.listdir(gp_dir) if gp_rule.match(name)]
 
-            if not filename.exists():
-                my_logger.error(f"Cannot find {filename} file! Skipping this model")
-                return -1
+            if len(filename) == 0:
+                my_logger.error(f"Cannot find GPfile for frame {num:03d}! Skipping this frame")
+                continue
+            filename = filename[-1]
 
             data_set = GPDataSet(
                 str(filename),
                 str(filename_info),
                 case,
                 sampling=1,
-                time_frame_number=num,
+                frame_num=num,
             )
 
             if not data_set.success:
                 my_logger.error(f"Cannot initialize GPDataSet! Skipping this frame")
+                continue
+
+            if data_set.slices == {}:
+                my_logger.error(f"No slices found in GPDataSet! Check your SliceInfoFile is valid")
                 continue
 
             contour_plots = data_set.plot_dataset(contours_to_plot)
@@ -228,7 +235,7 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
                 path_to_model = [Path(model_path) / name for name in os.listdir(model_path) if rule.match(name)]
 
                 biventricular_model = BiventricularModel(MODEL_RESOURCE_DIR)
-                control_points = np.loadtxt(path_to_model[0], delimiter=',', skiprows=1, usecols=[0, 1, 2]).astype(np.float16)
+                control_points = np.loadtxt(path_to_model[-1], delimiter=',', skiprows=1, usecols=[0, 1, 2]).astype(np.float16)
                 biventricular_model.update_control_mesh(control_points)
 
                 model = biventricular_model.plot_surface(
@@ -237,16 +244,19 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
                 data += model
 
             if image_path is not None:
-                image_plots, image_grids = plot_images(
-                    image_path,
-                    data_set,
-                    image_grids,
-                    output_path = None,
-                    shifts=None,  # No shifts applied
-                    frame=num
-                )
-                
-                data += image_plots
+                try:
+                    image_plots, image_grids = plot_images(
+                        image_path,
+                        data_set,
+                        image_grids,
+                        output_path = None,
+                        shifts=None,  # No shifts applied
+                        frame=num
+                    )
+                    
+                    data += image_plots
+                except Exception as e:
+                    my_logger.error(f"Error plotting images for frame {num:03}: {e}")
 
             output_folder_html = Path(output_folder, f"html{gp_suffix}")
             output_folder_html.mkdir(exist_ok=True)
@@ -254,29 +264,27 @@ def generate_html(folder: str,  out_dir: str ="./results/", gp_suffix: str ="", 
             figure = go.Figure(data=data)
             figure.update_layout(
                 paper_bgcolor='white',                
-                title=f"Guidepoints for {case} - Frame {num:03}",
+                title=f"Plot for {case} - Frame {num:03}",
             )
             figure.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False)
 
             plot(
                 figure,
                 filename=os.path.join(
-                    output_folder_html, f"{case}_gp_dataset_frame_{num:03}.html"
+                    output_folder_html, f"{case}_frame_{num:03}.html"
                 ),
                 auto_open=False,
             )
 
             progress.advance(task)
 
-
-
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='This function plots a GPFile  ')
+    parser = argparse.ArgumentParser(description='This script generates an HTML plot of guidepoints and fitted models for given cases.')
     parser.add_argument('-o', '--output_folder', type=Path, default="./html",
                         help='Path to the output folder')
     parser.add_argument('-gp', '--gp_directory', type=Path, 
-                        help='Define the directory containing guidepoint files', default="./html")
+                        help='Define the directory containing guidepoint files', default=None)
     parser.add_argument('--gp_suffix', type =str, default = '', help='guidepoints to use if we do not want to fit all the models in the input folder')
     parser.add_argument('--si_suffix', type =str, default = '', help='Define slice info to use if multiple SliceInfo.txt file are available')
     parser.add_argument('-mdir', '--model_directory', type=Path,
@@ -293,9 +301,16 @@ if __name__ == "__main__":
     if args.model_directory is not None:
         assert Path(args.model_directory).exists(), \
             f'model_directory does not exist. Cannot find {args.model_directory}!'
+        
+    if args.gp_directory is not None:
+        assert Path(args.gp_directory).exists(), \
+            f'gp_directory does not exist. Cannot find {args.gp_directory}!'
+    else:
+        logger.error('No gp_directory provided. Exiting...')
+        sys.exit(0)
 
     # set list of cases to process
-    case_list = os.listdir(args.gp_directory)
+    case_list = [c for c in os.listdir(args.gp_directory) if os.path.isdir(os.path.join(args.gp_directory, c))]
     case_dirs = [Path(args.gp_directory, case).as_posix() for case in case_list if not case.startswith('.')]
     logger.info(f"Found {len(case_dirs)} cases to plot.")
 
@@ -303,26 +318,31 @@ if __name__ == "__main__":
     start_time = time.time()
 
     try:
-        for case in case_dirs:
+        for dir in case_dirs:
+            case = os.path.basename(dir)
             try:
-                logger.info(f"Processing {os.path.basename(case)}")
+                logger.info(f"Processing {case}")
+
+                gp_dir = Path(args.gp_directory) / case
+
                 if args.model_directory is not None:
-                    model_dir = Path(args.model_directory) / os.path.basename(case)
+                    model_dir = Path(args.model_directory) / case
                 else:
                     model_dir = None
 
                 if args.image_directory is not None:
-                    image_dir = Path(args.image_directory) / os.path.basename(case) / "images"
+                    image_dir = Path(args.image_directory) / case / "images"
                 else:
                     image_dir = None
-                generate_html(case, out_dir=output_folder, gp_suffix=args.gp_suffix, si_suffix=args.si_suffix,
+
+                generate_html(case, gp_dir, out_dir=output_folder, gp_suffix=args.gp_suffix, si_suffix=args.si_suffix,
                                 frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_dir)
             except:
                 logger.error(f"Could not process: {os.path.basename(case)}")
 
         logger.info(f"Total cases processed: {len(case_dirs)}")
         logger.info(f"Total time: {time.time() - start_time}")
-        logger.success(f'Done. Results are saved in {output_folder}')
+        logger.success(f'Plots are saved in {output_folder}')
 
     except KeyboardInterrupt:
         logger.info(f"Program interrupted by the user")

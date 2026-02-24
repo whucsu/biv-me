@@ -1,10 +1,8 @@
 import argparse
 import os, sys
-import csv
 import re
 from pathlib import Path
 import numpy as np
-import pathlib
 
 from bivme import MODEL_RESOURCE_DIR
 from bivme.meshing.mesh import Mesh
@@ -20,7 +18,6 @@ from bivme.fitting.BiventricularModel import BiventricularModel
 import math
 from scipy.spatial import cKDTree
 from bivme.fitting.surface_enum import Surface
-import scipy.io
 
 # for printing while progress bar is progressing
 console = None

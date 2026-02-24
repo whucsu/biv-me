@@ -1,4 +1,3 @@
-from bivme.analysis import compute_volume
 from pytest import approx
 from bivme.analysis.compute_volume import find_volume
 from bivme.analysis.compute_wall_thickness import find_wall_thickness
@@ -7,8 +6,8 @@ import csv
 import os
 import pandas as pd
 from pathlib import Path
-import numpy as np
 import shutil
+
 def test_compute_volume():
     model_file = TEST_RESOURCE_DIR / 'template' / 'template_model_frame_001.txt'
     output_file = 'test_lvrv_volumes.csv'

@@ -1,22 +1,16 @@
-from scipy import spatial
 import functools
-
-import scipy
-from copy import deepcopy
+import pyvista as pv
+import plotly.graph_objs as go
+from scipy.io import loadmat
+from scipy.spatial import cKDTree
+from collections import OrderedDict
 
 # local imports
 from .GPDataSet import *
 from .surface_enum import Surface
-from .surface_enum import ContourType
 from .surface_enum import SURFACE_CONTOUR_MAP
-from .fitting_tools import *
 from .build_model_tools import *
-
-from collections import OrderedDict
-from nltk import flatten
-from loguru import logger
-import pyvista as pv
-import scipy.io
+from bivme.meshing.mesh import Mesh
 
 ##Author : Charlène Mauger, University of Auckland, c.mauger@auckland.ac.nz
 class BiventricularModel:
@@ -67,8 +61,8 @@ class BiventricularModel:
 
        surface_start_end                    Surface index limits for embedded
                                             triangles et_indices.
-                                            Surfaces are sorted in the following
-                                            order:  LV_ENDOCARDIAL, RV septum, RV free wall,
+                                            Surfaces are sorted in the following order:
+                                            LV_ENDOCARDIAL, RV septum, RV free wall,
                                             epicardium, mitral valve, aorta,
                                             tricuspid, pulmonary valve, RV insert.
 
@@ -106,7 +100,7 @@ class BiventricularModel:
     """Class constant, number of elements (187)."""
     NUM_SURFACE_NODES = 5810
     """class constant, number of nodes after subdivision (5810)."""
-    APEX_INDEX = 5485 #  # 50 endo #5485 #epi
+    APEX_INDEX = 5485  # # 50 endo #5485 #epi
     """class constant, vertex index defined as the apex point."""
     NUM_GAUSSIAN_POINTS = 5049
     """Number of gaussian points"""
@@ -121,9 +115,9 @@ class BiventricularModel:
 
     control_mesh_vertex_start_end = np.array(
         [
-            [0, 104], # LV_ENDOCARDIAL
-            [105, 210], # RV_ENDOCARDIAL
-            [211, 353], # EPICARDIAL
+            [0, 104],  # LV_ENDOCARDIAL
+            [105, 210],  # RV_ENDOCARDIAL
+            [211, 353],  # EPICARDIAL
         ]
     )
 
@@ -209,9 +203,9 @@ class BiventricularModel:
 
     control_mesh_start_end = np.array(
         [
-            [0, 191],   # LV_ENDOCARDIAL = 0
-            [192, 421], # RV_ENDOCARDIAL = 1
-            [422, 707], # EPICARDIAL = 2
+            [0, 191],  # LV_ENDOCARDIAL = 0
+            [192, 421],  # RV_ENDOCARDIAL = 1
+            [422, 707],  # EPICARDIAL = 2
         ]
     )
     """Class constant,  control mesh index limits for embedded triangles `et_indices_control_mesh`.
@@ -225,7 +219,27 @@ class BiventricularModel:
     get_control_mesh_start_end_index(surface_name)
     """
 
-    def __init__(self, control_mesh_dir: os.PathLike, label: str = "default", build_mode: bool = False, collision_detection: bool = False):
+    _CONST_ARRAYS = {
+        "matrix", "et_indices", "material",
+        "et_indices_control_mesh", "et_indices_thru_wall", "et_indices_epi_lvrv",
+        "gtstsg_x", "gtstsg_y", "gtstsg_z",
+        "et_vertex_element_num",
+        "mbder_dx", "mbder_dy", "mbder_dz",
+        "jac_11", "jac_12", "jac_13",
+        "basis_matrix",
+        # build_mode-only:
+        "et_vertex_xi", "b_spline", "boundary", "control_et_indices",
+        "phantom_points", "patch_coordinates", "fraction", "local_matrix",
+    }
+
+    # Attributes that typically CHANGE during fitting: copy (or recompute)
+    _MUTABLE_ARRAYS = {"control_mesh", "et_pos"}
+    _INPUT_MUTABLES = {"label", "build_mode", "collision_detection", "reference_collision"}
+
+    def __init__(self, control_mesh_dir: os.PathLike,
+                 label: str = "default",
+                 build_mode: bool = False,
+                 collision_detection: bool = False):
         """Return a Surface object whose control mesh should be
         fitted to the dataset *DataSet*.
 
@@ -234,282 +248,165 @@ class BiventricularModel:
         The build_mode allows to load the data needed to interpolate a
         surface field. For fitting purposes set build_mode to False
         """
-        self.build_mode = build_mode
-        """
-        False by default, true to evaluate surface points at xi local 
-        coordinates
-        """
-
-        assert control_mesh_dir.exists(), \
-            f"Cannot find {control_mesh_dir}!"
-
         self.label = label
+
+        # False by default, true to evaluate surface points at xi local coordinates
+        self.build_mode = build_mode
+
+        # `numNodes`X3 array[float] of x,y,z coordinates of control mesh.
+        assert control_mesh_dir.exists(), f"Cannot find {control_mesh_dir}!"
         model_file = control_mesh_dir / "model.txt"
-        assert model_file.exists(), \
-            f"Missing {model_file}!"
+        assert model_file.exists(), f"Missing {model_file}!"
+        self.control_mesh = np.loadtxt(model_file)
 
-        self.control_mesh = (
-            pd.read_table(model_file, sep=r'\s+', header=None, engine="c")
-        ).values
-
-        """ `numNodes`X3 array[float] of x,y,z coordinates of control mesh.
-        """
-
+        # Subdivision matrix (`numNodes`x`numSurfaceNodes`).
         subdivision_matrix_file = control_mesh_dir / "subdivision_matrix_sparse.mat"
-        assert subdivision_matrix_file.exists(), \
-            f"Missing {subdivision_matrix_file}!"
+        assert subdivision_matrix_file.exists(), f"Missing {subdivision_matrix_file}!"
+        self.matrix = loadmat(subdivision_matrix_file)['S'].toarray()
 
-        self.matrix = scipy.io.loadmat(subdivision_matrix_file)['S'].toarray()
-        """Subdivision matrix (`numNodes`x`numSurfaceNodes`).
-        """
-
+        # `numSurfaceNodes`x3 array[float] of x,y,z coordinates for each surface nodes.
         self.et_pos = np.dot(self.matrix, self.control_mesh)
-        """`numSurfaceNodes`x3 array[float] of x,y,z coordinates for each
-                                            surface nodes.
-        """
 
+        # 11760x3 array[int] of elements connectivity (n1,n2,n3) for each face.
         et_index_file = control_mesh_dir / "ETIndicesSorted.txt"
-        assert et_index_file.exists(), \
-            f"Missing {et_index_file}!"
-
-        self.et_indices = (
-                              pd.read_table(et_index_file, sep=r'\s+', header=None, engine="c")
-                          ).values.astype(int) - 1
-        """ 11760x3 array[int] of elements connectivity (n1,n2,n3) for each face."""
+        assert et_index_file.exists(), f"Missing {et_index_file}!"
+        self.et_indices = np.loadtxt(et_index_file, dtype=int) - 1
 
         material_file = control_mesh_dir / 'ETIndicesMaterials.txt'
-        assert material_file.exists(), \
-            f"Missing {et_index_file}"
+        assert material_file.exists(), f"Missing {et_index_file}"
         self.material = np.loadtxt(material_file, dtype='str')
 
+        # Collision detection on or off
         self.collision_detection = collision_detection
 
         if collision_detection:
             self.reference_collision = set(self.detect_collision())
 
+        # Through-wall mesh indices for myocardial mass calculations
         et_index_thru_wall_file = control_mesh_dir / "thru_wall_et_indices.txt"
-        assert et_index_thru_wall_file.exists(), \
-            f"Missing {et_index_thru_wall_file} for myocardial mass calculation"
+        assert et_index_thru_wall_file.exists(), f"Missing {et_index_thru_wall_file} for myocardial mass calculation"
+        self.et_indices_thru_wall = np.loadtxt(et_index_thru_wall_file, dtype=int) - 1
 
+        # 11760x3 array[int] of elements connectivity (n1,n2,n3) for each face of the coarse_mesh.
         et_index_file = control_mesh_dir / "ETIndices_control_mesh.txt"
-        assert et_index_file.exists(), \
-            f"Missing {et_index_file}!"
+        assert et_index_file.exists(), f"Missing {et_index_file}!"
+        self.et_indices_control_mesh = np.loadtxt(et_index_file, dtype=int) - 1
 
-        self.et_indices_control_mesh = (
-                              pd.read_table(et_index_file, sep=r'\s+', header=None, engine="c")
-                          ).values.astype(int) - 1
-        """ 11760x3 array[int] of elements connectivity (n1,n2,n3) for each face of the coarse_mesh."""
+        # RB addition for MyoMass calc
+        et_index_epi_lvrv_file = control_mesh_dir / "ETIndicesEpiRVLV.txt"
+        assert et_index_epi_lvrv_file.exists(), f"Missing {et_index_epi_lvrv_file} for myocardial mass calculation"
+        self.et_indices_epi_lvrv = np.loadtxt(et_index_epi_lvrv_file, dtype=int) - 1
 
-        self.et_indices_thru_wall = (
-                                       pd.read_table(et_index_thru_wall_file, sep=r'\s+', header=None)
-                                   ).values.astype(int) - 1
-
-        et_index_epi_lvrv_file = control_mesh_dir / "ETIndicesEpiRVLV.txt"  # RB addition for MyoMass calc
-        assert et_index_epi_lvrv_file.exists(), \
-            f"Missing {et_index_epi_lvrv_file} for myocardial mass calculation"
-
-        self.et_indices_epi_lvrv = (
-                                      pd.read_table(
-                                          et_index_epi_lvrv_file, sep=r'\s+', header=None, engine="c"
-                                      )
-                                  ).values.astype(int) - 1
-
+        # `numNodes`x`numNodes` Regularization/Smoothing matrix along Xi1 (circumferential direction)
         gtstsg_x_file = control_mesh_dir / "GTSTG_x_sparse.mat"
-        assert gtstsg_x_file.exists(), \
-            f"Missing {gtstsg_x_file}"
-        self.gtstsg_x = scipy.io.loadmat(gtstsg_x_file)['S'].toarray()
-        """`numNodes`x`numNodes` Regularization/Smoothing matrix along Xi1 (
-        circumferential direction)        
-        """
+        assert gtstsg_x_file.exists(), f"Missing {gtstsg_x_file}"
+        self.gtstsg_x = loadmat(gtstsg_x_file)['S'].toarray()
 
+        # `numNodes`x`numNodes` Regularization/Smoothing matrix along Xi2 (longitudinal) direction
         gtstsg_y_file = control_mesh_dir / "GTSTG_y_sparse.mat"
-        assert gtstsg_y_file.exists(), \
-            f"Missing {gtstsg_y_file}"
-        self.gtstsg_y = scipy.io.loadmat(gtstsg_y_file)['S'].toarray()
-        """`numNodes`x`numNodes` Regularization/Smoothing matrix along
-                                            Xi2 (longitudinal) direction"""
+        assert gtstsg_y_file.exists(), f"Missing {gtstsg_y_file}"
+        self.gtstsg_y = loadmat(gtstsg_y_file)['S'].toarray()
 
+        # `numNodes`x`numNodes` Regularization/Smoothing matrix along Xi3 (transmural) direction
         gtstsg_z_file = control_mesh_dir / "GTSTG_z_sparse.mat"
-        assert gtstsg_z_file.exists(), \
-            f"Missing {gtstsg_z_file}"
-        self.gtstsg_z = scipy.io.loadmat(gtstsg_z_file)['S'].toarray()
-        """`numNodes`x`numNodes` Regularization/Smoothing matrix along
-                                                    Xi3 (transmural) direction"""
+        assert gtstsg_z_file.exists(), f"Missing {gtstsg_z_file}"
+        self.gtstsg_z = loadmat(gtstsg_z_file)['S'].toarray()
 
+        # `numSurfaceNodes`x1 array[int] Element num for each surface nodes. Used for surface evaluation
         et_vertex_element_num_file = control_mesh_dir / "etVertexElementNum.txt"
-        assert et_vertex_element_num_file.exists(), \
-            f"Missing {et_vertex_element_num_file}"
-        self.et_vertex_element_num = (
-                                         pd.read_table(
-                                             et_vertex_element_num_file, sep=r'\s+', header=None, engine="c"
-                                         )
-                                     ).values[:, 0].astype(int) - 1
-        """`numSurfaceNodes`x1 array[int] Element num for each surface nodes.
-        Used for surface evaluation 
-        """
+        assert et_vertex_element_num_file.exists(), f"Missing {et_vertex_element_num_file}"
+        self.et_vertex_element_num = np.loadtxt(et_vertex_element_num_file, dtype=int, usecols=0) - 1
 
+        # `numSurfaceNodes`x`numNodes` Weighted matrix to calculate gradients of the displacement field at Gauss points
         mbder_x_file = control_mesh_dir / "mBder_x_sparse.mat"
-        assert mbder_x_file.exists(), \
-            f"Missing {mbder_x_file}"
-        self.mbder_dx = scipy.io.loadmat(mbder_x_file)['S'].toarray()
-
-
-        """`numSurfaceNodes`x`numNodes` Matrix containing  weights used to 
-        calculate gradients of the displacement field at Gauss point locations.
-        """
+        assert mbder_x_file.exists(), f"Missing {mbder_x_file}"
+        self.mbder_dx = loadmat(mbder_x_file)['S'].toarray()
 
         mbder_y_file = control_mesh_dir / "mBder_y_sparse.mat"
-        assert mbder_y_file.exists(), \
-            f"Missing {mbder_y_file}"
-        self.mbder_dy = scipy.io.loadmat(mbder_y_file)['S'].toarray()
-        """`numSurfaceNodes`x`numNodes` Matrix containing  weights used to 
-        calculate gradients of the displacement field at Gauss point locations.
-        """
+        assert mbder_y_file.exists(), f"Missing {mbder_y_file}"
+        self.mbder_dy = loadmat(mbder_y_file)['S'].toarray()
 
         mbder_z_file = control_mesh_dir / "mBder_z_sparse.mat"
-        assert mbder_z_file.exists(), \
-            f"Missing {mbder_z_file}"
-        self.mbder_dz = scipy.io.loadmat(mbder_z_file)['S'].toarray()
-        """`numSurfaceNodes`x`numNodes` Matrix containing  weights used to 
-        calculate gradients of the displacement field at Gauss point locations.
-        """
+        assert mbder_z_file.exists(), f"Missing {mbder_z_file}"
+        self.mbder_dz = loadmat(mbder_z_file)['S'].toarray()
 
+        # 11968 x `numNodes` matrix containing weights used to calculate Jacobians along Xi1 at Gauss point locations
+        # Each matrix element is a linear combination of the 388 control points.
         jac_11_file = control_mesh_dir / "J11_sparse.mat"
-        assert jac_11_file.exists(), \
-            f"Missing {jac11_file}"
-        self.jac_11 = scipy.io.loadmat(jac_11_file)['S'].toarray()
-        """11968 x `numNodes` matrix containing weights used to calculate 
-        Jacobians  along Xi1 at Gauss point location.
-        Each matrix element is a linear combination of the 388 control points.
-        """
+        assert jac_11_file.exists(), f"Missing {jac_11_file}"
+        self.jac_11 = loadmat(jac_11_file)['S'].toarray()
 
+        # 11968 x `numNodes` matrix containing weights used to calculate Jacobians along Xi2 at Gauss point locations
+        # Each matrix element is a linear combination of the 388 control points.
         jac_12_file = control_mesh_dir / "J12_sparse.mat"
-        assert jac_12_file.exists(), \
-            f"Missing {jac_12_file}"
-        self.jac_12 = scipy.io.loadmat(jac_12_file)['S'].toarray()
-        """11968 x `numNodes` matrix containing weights used to calculate 
-        Jacobians  along Xi2 at Gauss point location.
-        Each matrix element is a linear combination of the 388 control points.
-        """
+        assert jac_12_file.exists(), f"Missing {jac_12_file}"
+        self.jac_12 = loadmat(jac_12_file)['S'].toarray()
 
+        # 11968 x `numNodes` matrix containing weights used to calculate Jacobians along Xi3 at Gauss point locations
+        # Each matrix element is a linear combination of the 388 control points.
         jac_13_file = control_mesh_dir / "J13_sparse.mat"
-        assert jac_13_file.exists(), \
-            f"Missing {jac_13_file}"
-        self.jac_13 = scipy.io.loadmat(jac_13_file)['S'].toarray()
-        """11968 x `numNodes` matrix containing weights used to calculate 
-        Jacobians along Xi3 direction at Gauss point location.
-        Each matrix element is a linear combination of the 388 control points.
-        """
+        assert jac_13_file.exists(), f"Missing {jac_13_file}"
+        self.jac_13 = loadmat(jac_13_file)['S'].toarray()
 
+        # `numSurfaceNodes`x`numNodes` array[float] basis functions used to evaluate surface at surface points
         basic_matrix_file = control_mesh_dir / "basis_matrix_sparse.mat"
-        assert basic_matrix_file.exists(), \
-            f"Missing {basic_matrix_file}"
-        self.basis_matrix = scipy.io.loadmat(basic_matrix_file)['S'].toarray()
+        assert basic_matrix_file.exists(), f"Missing {basic_matrix_file}"
+        self.basis_matrix = loadmat(basic_matrix_file)['S'].toarray()
 
-        """`numSurfaceNodes`x`numNodes` array[float]  basis  functions used 
-        to evaluate surface at surface point locations
-        """
-
+        # Build mode must be true from here on
         if not self.build_mode:
             return
 
+        # `numSurfaceNodes`x3 array[float] of local xi position (xi1,xi2,xi3) for each vertex.
         et_vertex_xi_file = control_mesh_dir / "etVertexXi.txt"
-        assert et_vertex_xi_file.exists(), \
-            f"Missing {et_vertex_xi_file}"
-        self.et_vertex_xi = (
-            pd.read_table(
-                et_vertex_xi_file, sep=r'\s+', header=None, engine="c"
-            )
-        ).values
-        """ `numSurfaceNodes`x3 array[float] of local xi position (xi1,xi2,
-        xi3) for each vertex.
-        """
+        assert et_vertex_xi_file.exists(), f"Missing {et_vertex_xi_file}"
+        self.et_vertex_xi = np.loadtxt(et_vertex_xi_file)
 
+        # numSurfaceNodesX32 array[int] of 32 control points which need to be weighted (for each vertex)
         b_spline_file = control_mesh_dir / "control_points_patches.txt"
-        assert b_spline_file.exists(), \
-            f"Missing {b_spline_file}"
-        self.b_spline = (
-                            pd.read_table(b_spline_file, sep=r'\s+', header=None, engine="c")
-                        ).values.astype(int) - 1
-        """ numSurfaceNodesX32 array[int] of 32 control points which need to be 
-         weighted (for each vertex)
-        """
+        assert b_spline_file.exists(), f"Missing {b_spline_file}"
+        self.b_spline = np.loadtxt(b_spline_file, dtype=int) - 1
 
+        # boundary
         boundary_file = control_mesh_dir / "boundary.txt"
-        assert boundary_file.exists(), \
-            f"Missing {boundary_file}"
-        self.boundary = (
-            pd.read_table(boundary_file, sep=r'\s+', header=None, engine="c")
-        ).values.astype(int)
-        """ boundary"""
+        assert boundary_file.exists(), f"Missing {boundary_file}"
+        self.boundary = np.loadtxt(boundary_file, dtype=int)
 
+        # (K,8) matrix of control mesh connectivity
         control_ef_file = control_mesh_dir / "control_mesh_connectivity.txt"
-        assert control_ef_file.exists(), \
-            f"Missing {control_ef_file}"
-        self.control_et_indices = (
-                                      pd.read_table(
-                                          control_ef_file, sep=r'\s+', header=None, engine="c"
-                                      )
-                                  ).values.astype(int) - 1
-        """ (K,8) matrix of control mesh connectivity"""
+        assert control_ef_file.exists(), f"Missing {control_ef_file}"
+        self.control_et_indices = np.loadtxt(control_ef_file, dtype=int) - 1
 
+        # Some surface nodes are not needed for the definition of the biventricular 2D surface therefore they are not
+        # include in the surface node matrix. However they are necessary for the 3D interpolation (septum area).
+        # These elements are called the phantom points and the corresponding information as the subdivision level,
+        # localpatch coordinates etc. are stored in phantom points array.
         phantom_points_file = control_mesh_dir / "phantom_points.txt"
-        assert phantom_points_file.exists(), \
-            f"Missing {phantom_points_file}"
-        self.phantom_points = (
-            pd.read_table(
-                phantom_points_file, sep=r'\s+', header=None, engine="c"
-            )
-        ).values.astype(float)
-        """ Some surface nodes are not needed for the 
-        definition of the biventricular 2D surface therefore they are 
-        not include in the surface node matrix. However they are 
-        necessary for the 3D interpolation (septum area).
-        these elements are called the phantom points and the 
-        corresponding information as the subdivision level , local
-        patch coordinates etc. are stored in phantom points array
-        """
-
+        assert phantom_points_file.exists(), f"Missing {phantom_points_file}"
+        self.phantom_points = np.loadtxt(phantom_points_file, dtype=float)
         self.phantom_points[:, :17] = self.phantom_points[:, :17].astype(int) - 1
+
+        # local patch coordinates
         patch_coordinates_file = control_mesh_dir / "patch_coordinates.txt"
-        assert patch_coordinates_file.exists(), \
-            f"Missing {patch_coordinates_file}"
-        self.patch_coordinates = (
-            pd.read_table(
-                patch_coordinates_file, sep=r'\s+', header=None, engine="c"
-            )
-        ).values
-        """local patch coordinates. 
+        assert patch_coordinates_file.exists(), f"Missing {patch_coordinates_file}"
+        self.patch_coordinates = np.loadtxt(patch_coordinates_file)
 
-        According to CC subdivision surface, to evaluate a point on a surface 
-        the original control mesh needs to be subdivided in 'child' patches.  
+        # According to CC subdivision surface, to evaluate a point on a surface the original control mesh needs to be
+        # subdivided in 'child' patches. The coordinates of the child patches are then used to map the local
+        # coordinates with respect to control mesh in to the local coordinates with respect to child patch.
+        # The patch coordinates and subdivision level of each surface node are pre-computed and here imported as
+        # patch_coordinates and fraction. See:
+        # Atlas-based Analysis of Biventricular Heart Shape and Motion in Congenital Heart Disease. C. Mauger (p34-37)
 
-        The coordinates of the child patches are then used to map the local 
-        coordinates with respect to control mesh in to the local 
-        coordinates with respect to child patch.
-
-        The patch coordinates and subdivision level of each surface node are 
-        pre-computed and here imported as patch_coordinates and fraction.
-
-        For details see
-        Atlas-based Analysis of Biventricular Heart 
-        Shape and Motion in Congenital Heart Disease. C. Mauger (p34-37)
-        """
+        # `numSurfaceNodes`x1 vector[int] subdivision level of the  patch (level 0 = 1,level 1 = 0.5,level 2 = 0.25).
+        # See patch_coordinates for details`
         fraction_file = control_mesh_dir / "fraction.txt"
-        assert fraction_file.exists(), \
-            f"Missing {fraction_file}"
-        self.fraction = (
-            pd.read_table(fraction_file, sep=r'\s+', header=None, engine="c")
-        ).values
-        """`numSurfaceNodes`x1 vector[int] subdivision level of the 
-         patch (level 0 = 1,level 1 = 0.5,level 2 = 0.25). See 
-         `patch_coordinates for details`
-        """
+        assert fraction_file.exists(), f"Missing {fraction_file}"
+        self.fraction = np.loadtxt(fraction_file)
 
         local_matrix_file = control_mesh_dir / "local_matrix_sparse.mat"
-        assert local_matrix_file.exists(), \
-            f"Missing {local_matrix_file}"
-        self.local_matrix = scipy.io.loadmat(local_matrix_file)['S'].toarray()
+        assert local_matrix_file.exists(), f"Missing {local_matrix_file}"
+        self.local_matrix = loadmat(local_matrix_file)['S'].toarray()
 
     def get_nodes(self) -> np.ndarray:
         """
@@ -568,14 +465,17 @@ class BiventricularModel:
 
         if surface_name == Surface.RV_INSERT:
             return self.et_vertex_start_end[8, :]
+
         if surface_name == Surface.APEX:
             return [self.APEX_INDEX] * 2
+
+        return None
 
     def get_surface_faces(self, surface: Surface) -> np.ndarray:
         """Get the faces definition for a surface triangulation"""
 
         surface_index = self.get_surface_start_end_index(surface)
-        return self.et_indices[surface_index[0] : surface_index[1] + 1, :]
+        return self.et_indices[surface_index[0]: surface_index[1] + 1, :]
 
     def get_surface_start_end_index(self, surface_name: Surface) -> np.ndarray:
         """Return first and last element index for a given surface, tu use
@@ -589,7 +489,6 @@ class BiventricularModel:
         2x1 array containing first and last vertices index belonging to
            `surface_name`
         """
-
         if surface_name == Surface.LV_ENDOCARDIAL:
             return self.surface_start_end[0, :]
 
@@ -614,31 +513,7 @@ class BiventricularModel:
         if surface_name == Surface.PULMONARY_VALVE:
             return self.surface_start_end[7, :]
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return None
 
     def get_control_mesh_vertex_start_end_index(self, surface_name: ControlMesh) -> np.ndarray:
         """Return first and last vertex index for a given surface to use
@@ -654,7 +529,6 @@ class BiventricularModel:
         2x1 array with first and last vertices index belonging to
             surface_name
         """
-
         if surface_name == ControlMesh.LV_ENDOCARDIAL:
             return self.control_mesh_vertex_start_end[0, :]
 
@@ -664,23 +538,12 @@ class BiventricularModel:
         if surface_name == Surface.EPICARDIAL:
             return self.control_mesh_vertex_start_end[2, :]
 
-        #if surface_name == Surface.MITRAL_VALVE:
-        #    return self.et_vertex_start_end[4, :]
-#
-        #if surface_name == Surface.AORTA_VALVE:
-        #    return self.et_vertex_start_end[5, :]
-#
-        #if surface_name == Surface.TRICUSPID_VALVE:
-        #    return self.et_vertex_start_end[6, :]
-#
-        #if surface_name == Surface.PULMONARY_VALVE:
-        #    return self.et_vertex_start_end[7, :]
+        return None
 
     def get_control_mesh_faces(self, surface: ControlMesh) -> np.ndarray:
         """Get the faces definition for a surface triangulation"""
-
         surface_index = self.get_control_mesh_start_end_index(surface)
-        return self.et_indices_control_mesh[surface_index[0] : surface_index[1] + 1, :]
+        return self.et_indices_control_mesh[surface_index[0]: surface_index[1] + 1, :]
 
     def get_control_mesh_start_end_index(self, surface_name: ControlMesh) -> np.ndarray:
         """Return first and last element index for a given surface, tu use
@@ -694,7 +557,6 @@ class BiventricularModel:
         2x1 array containing first and last vertices index belonging to
            `surface_name`
         """
-
         if surface_name == ControlMesh.LV_ENDOCARDIAL:
             return self.surface_start_end[0, :]
 
@@ -704,17 +566,7 @@ class BiventricularModel:
         if surface_name == ControlMesh.EPICARDIAL:
             return self.surface_start_end[2, :]
 
-        #if surface_name == ControlMesh.MITRAL_VALVE:
-        #    return self.surface_start_end[4, :]
-#
-        #if surface_name == ControlMesh.AORTA_VALVE:
-        #    return self.surface_start_end[5, :]
-#
-        #if surface_name == ControlMesh.TRICUSPID_VALVE:
-        #    return self.surface_start_end[6, :]
-#
-        #if surface_name == ControlMesh.PULMONARY_VALVE:
-        #    return self.surface_start_end[7, :]
+        return None
 
     def is_diffeomorphic(self, updated_control_mesh: np.ndarray, min_jacobian: float) -> bool:
         """This function checks the Jacobian value at Gauss point location
@@ -737,33 +589,44 @@ class BiventricularModel:
         -------
             boolean value
         """
+        # # Precompute inner products for all jac_* with each mesh component (vectorized for much faster processing)
+        # j11 = self.jac_11 @ updated_control_mesh[:, 0]
+        # j12 = self.jac_12 @ updated_control_mesh[:, 0]
+        # j13 = self.jac_13 @ updated_control_mesh[:, 0]
+        #
+        # j21 = self.jac_11 @ updated_control_mesh[:, 1]
+        # j22 = self.jac_12 @ updated_control_mesh[:, 1]
+        # j23 = self.jac_13 @ updated_control_mesh[:, 1]
+        #
+        # j31 = self.jac_11 @ updated_control_mesh[:, 2]
+        # j32 = self.jac_12 @ updated_control_mesh[:, 2]
+        # j33 = self.jac_13 @ updated_control_mesh[:, 2]
+        #
+        # # Stack into a (N, 3, 3) array of Jacobians
+        # jacobians = np.stack([
+        #     np.stack([j11, j12, j13], axis=-1),
+        #     np.stack([j21, j22, j23], axis=-1),
+        #     np.stack([j31, j32, j33], axis=-1),
+        # ], axis=-2)  # shape: (N, 3, 3)
+        #
+        # # Compute all determinants at once
+        # determinants = np.linalg.det(jacobians)
 
-        for i in range(len(self.jac_11)):
-            jacobi = np.array(
-                [
-                    [
-                        np.inner(self.jac_11[i, :], updated_control_mesh[:, 0]),
-                        np.inner(self.jac_12[i, :], updated_control_mesh[:, 0]),
-                        np.inner(self.jac_13[i, :], updated_control_mesh[:, 0]),
-                    ],
-                    [
-                        np.inner(self.jac_11[i, :], updated_control_mesh[:, 1]),
-                        np.inner(self.jac_12[i, :], updated_control_mesh[:, 1]),
-                        np.inner(self.jac_13[i, :], updated_control_mesh[:, 1]),
-                    ],
-                    [
-                        np.inner(self.jac_11[i, :], updated_control_mesh[:, 2]),
-                        np.inner(self.jac_12[i, :], updated_control_mesh[:, 2]),
-                        np.inner(self.jac_13[i, :], updated_control_mesh[:, 2]),
-                    ],
-                ]
-            )
+        # Ensure openBLAS-friendly
+        C = np.ascontiguousarray(updated_control_mesh, dtype=np.float64)
 
-            determinant = np.linalg.det(jacobi)
-            if determinant < min_jacobian:
-                return False
+        # 3 matmuls instead of 9 matvecs
+        # Each jni is (N, 3) and contains a column of the Jacobian per row:
+        jn1 = self.jac_11 @ C
+        jn2 = self.jac_12 @ C
+        jn3 = self.jac_13 @ C
 
-        return True
+        # det(J) = (T1 x T2) · T3  (row-wise)
+        # Einstein summation for faster processing
+        cross = np.cross(jn1, jn2, axis=1)  # (N, 3)
+        determinants = np.einsum('ij,ij->i', cross, jn3)  # (N,)
+
+        return np.all(determinants >= min_jacobian)
 
     def update_pose_and_scale(self, dataset: GPDataSet) -> None:
         """A method that scale and translate the model to rigidly align
@@ -779,16 +642,13 @@ class BiventricularModel:
 
         `scale_factor` scale factor between template and data points.
         """
-
         scale_factor = self.get_scaling(dataset)
         self.update_control_mesh(self.control_mesh * scale_factor)
 
         # The rotation is defined about the origin so we need to translate the model to the origin
         self.update_control_mesh(self.control_mesh - self.et_pos.mean(axis=0))
         rotation = self.get_rotation(dataset)
-        self.update_control_mesh(
-            np.array([np.dot(rotation, node) for node in self.control_mesh])
-        )
+        self.update_control_mesh(np.array([np.dot(rotation, node) for node in self.control_mesh]))
 
         # Translate the model back to origin of the DataSet coordinate system
         translation = self.get_translation(dataset)
@@ -813,15 +673,13 @@ class BiventricularModel:
             self.get_surface_vertex_start_end_index(Surface.TRICUSPID_VALVE)[1],
         ]
         model_shape = np.array(self.et_pos[model_shape_index, :])
-        reference_shape = np.array(
-            [dataset.apex, dataset.mitral_centroid, dataset.tricuspid_centroid]
-        )
+        reference_shape = np.array([dataset.apex, dataset.mitral_centroid, dataset.tricuspid_centroid])
         mean_m = model_shape.mean(axis=0)
         mean_r = reference_shape.mean(axis=0)
         model_shape = model_shape - mean_m
         reference_shape = reference_shape - mean_r
-        ss_model = (model_shape**2).sum()
-        ss_reference = (reference_shape**2).sum()
+        ss_model = (model_shape ** 2).sum()
+        ss_reference = (reference_shape ** 2).sum()
 
         # centered Forbidius norm
         norm_model = np.sqrt(ss_model)
@@ -842,11 +700,12 @@ class BiventricularModel:
         --------
           `translation` 3X1 array[float] with x, y and z translation
         """
-
         dataset_coordinates = [dataset.apex, dataset.mitral_centroid, dataset.tricuspid_centroid]
-        model_point_indices = [self.APEX_INDEX, self.get_surface_vertex_start_end_index(Surface.MITRAL_VALVE)[1], self.get_surface_vertex_start_end_index(Surface.TRICUSPID_VALVE)[1]]
-        model_coordinates = self.et_pos[model_point_indices,:]
-        translation = np.mean(dataset_coordinates, axis=0) - np.mean(model_coordinates,axis=0)
+        model_point_indices = [self.APEX_INDEX,
+                               self.get_surface_vertex_start_end_index(Surface.MITRAL_VALVE)[1],
+                               self.get_surface_vertex_start_end_index(Surface.TRICUSPID_VALVE)[1]]
+        model_coordinates = self.et_pos[model_point_indices, :]
+        translation = np.mean(dataset_coordinates, axis=0) - np.mean(model_coordinates, axis=0)
 
         return translation
 
@@ -864,11 +723,8 @@ class BiventricularModel:
         --------
         `rotation` 3x3 rotation matrix
         """
-
         base = data_set.mitral_centroid
-        base_model = self.et_pos[
-                     self.get_surface_vertex_start_end_index(Surface.MITRAL_VALVE)[1], :
-                     ]
+        base_model = self.et_pos[self.get_surface_vertex_start_end_index(Surface.MITRAL_VALVE)[1], :]
 
         # computes data_set coordinates system
         x_axis = data_set.apex - base
@@ -890,33 +746,22 @@ class BiventricularModel:
         max_d_model = np.linalg.norm(0.5 * (apex_position_model - base_model))
         min_d_model = -np.linalg.norm(0.5 * (apex_position_model - base_model))
 
-        point_proj = data_set.points_coordinates[
-            (data_set.contour_type == ContourType.SAX_LV_ENDOCARDIAL), :
-        ]
+        point_proj = data_set.points_coordinates[(data_set.contour_type == ContourType.SAX_LV_ENDOCARDIAL), :]
 
         point_proj = np.vstack(
-            (
-                point_proj,
-                data_set.points_coordinates[
-                    (data_set.contour_type == ContourType.LAX_LV_ENDOCARDIAL), :
-                ]
-            )
+            (point_proj, data_set.points_coordinates[(data_set.contour_type == ContourType.LAX_LV_ENDOCARDIAL), :])
         )
 
-        assert len(point_proj) > 0, \
-            f"No LV contours found in get_rotation"
+        assert len(point_proj) > 0, f"No LV contours found in get_rotation"
 
         temp_d = [np.dot(x_axis, p) for p in (point_proj - temp_original)]
         max_d = max(np.max(temp_d), max_d)
         min_d = min(np.min(temp_d), min_d)
 
         point_proj_model = self.et_pos[
-            self.get_surface_vertex_start_end_index(Surface.LV_ENDOCARDIAL)[
-                0
-            ] : self.get_surface_vertex_start_end_index(Surface.LV_ENDOCARDIAL)[1]
-            + 1,
-            :,
-        ]
+                           self.get_surface_vertex_start_end_index(Surface.LV_ENDOCARDIAL)[0]:
+                           self.get_surface_vertex_start_end_index(Surface.LV_ENDOCARDIAL)[1] + 1,
+                           :, ]
 
         temp_d_model = [
             np.dot(x_axis_model, point_model)
@@ -926,38 +771,29 @@ class BiventricularModel:
         min_d_model = min(np.min(temp_d_model), min_d_model)
 
         centroid = temp_original + min_d * x_axis + ((max_d - min_d) / 3.0) * x_axis
-        centroid_model = (
-            temp_original_model
-            + min_d_model * x_axis_model
-            + ((max_d_model - min_d_model) / 3.0) * x_axis_model
-        )
+        centroid_model = (temp_original_model
+                          + min_d_model * x_axis_model
+                          + ((max_d_model - min_d_model) / 3.0) * x_axis_model
+                          )
 
         # Compute Oy axis
-        valid_index = (data_set.contour_type == ContourType.SAX_RV_FREEWALL) + (
-            data_set.contour_type == ContourType.SAX_RV_SEPTUM
-        ) + (data_set.contour_type == ContourType.LAX_RV_FREEWALL) + (
-            data_set.contour_type == ContourType.LAX_RV_SEPTUM
-        )
+        valid_index = ((data_set.contour_type == ContourType.SAX_RV_FREEWALL) +
+                       (data_set.contour_type == ContourType.SAX_RV_SEPTUM) +
+                       (data_set.contour_type == ContourType.LAX_RV_FREEWALL) +
+                       (data_set.contour_type == ContourType.LAX_RV_SEPTUM))
 
         rv_endo_points = data_set.points_coordinates[valid_index, :]
-
-        rv_endo_points_model = self.et_pos[
-            self.get_surface_vertex_start_end_index(Surface.RV_SEPTUM)[
-                0
-            ]:self.get_surface_vertex_start_end_index(Surface.RV_FREEWALL)[1]
-            + 1,
-            :,
-        ]
+        septal_start = self.get_surface_vertex_start_end_index(Surface.RV_SEPTUM)[0]
+        rv_fw_start = self.get_surface_vertex_start_end_index(Surface.RV_FREEWALL)[1]
+        rv_endo_points_model = self.et_pos[septal_start:rv_fw_start + 1, :]
 
         rv_centroid = rv_endo_points.mean(axis=0)
         rv_centroid_model = rv_endo_points_model.mean(axis=0)
 
-        scale = np.dot(x_axis, rv_centroid) - np.dot(x_axis, centroid) / np.dot(
-            x_axis, x_axis
-        )
-        scale_model = np.dot(x_axis_model, rv_centroid_model) - np.dot(
-            x_axis_model, centroid_model
-        ) / np.dot(x_axis_model, x_axis_model)
+        scale = np.dot(x_axis, rv_centroid) - np.dot(x_axis, centroid) / np.dot(x_axis, x_axis)
+        scale_model = (np.dot(x_axis_model, rv_centroid_model) -
+                       np.dot(x_axis_model, centroid_model) /
+                       np.dot(x_axis_model, x_axis_model))
         rv_proj = centroid + scale * x_axis
         rv_proj_model = centroid_model + scale_model * x_axis_model
 
@@ -985,18 +821,12 @@ class BiventricularModel:
         #        R=UMVT, where M=diag([11det(U)det(V)])
 
         # Step 1
-        b = (
-            np.outer(x_axis, x_axis_model)
-            + np.outer(y_axis, y_axis_model)
-            + np.outer(z_axis, z_axis_model)
-        )
+        b = (np.outer(x_axis, x_axis_model) + np.outer(y_axis, y_axis_model) + np.outer(z_axis, z_axis_model))
 
         # Step 2
         [u, _, v_t] = np.linalg.svd(b)
 
-        m = np.array(
-            [[1, 0, 0], [0, 1, 0], [0, 0, np.linalg.det(u) * np.linalg.det(v_t)]]
-        )
+        m = np.array([[1, 0, 0], [0, 1, 0], [0, 0, np.linalg.det(u) * np.linalg.det(v_t)]])
         rotation = np.dot(u, np.dot(m, v_t))
 
         return rotation
@@ -1008,12 +838,10 @@ class BiventricularModel:
         new_control_mesh: (388,3) array of new control node positions
         """
         self.control_mesh = new_control_mesh
-        self.et_pos = np.linalg.multi_dot([self.matrix, self.control_mesh])
+        self.et_pos = self.matrix @ self.control_mesh
 
     def detect_collision(self, debug: bool = False) -> list:
         ##TODO Initialise pv meshes is collision detection set to on
-
-        from bivme.meshing.mesh import Mesh
         model = Mesh('mesh')
         model.set_nodes(self.et_pos)
         model.set_elements(self.et_indices)
@@ -1185,7 +1013,7 @@ class BiventricularModel:
 
         return output
 
-    def get_intersection_with_plane(self, po: np.ndarray, no: np.ndarray, surface_to_use: Surface=None) -> np.ndarray:
+    def get_intersection_with_plane(self, po: np.ndarray, no: np.ndarray, surface_to_use: Surface = None) -> np.ndarray:
         """Calculate intersection points between a plane with the
         biventricular model (LV_ENDOCARDIAL only)
 
@@ -1238,13 +1066,9 @@ class BiventricularModel:
 
             # pivot points
 
-            i_pos = [
-                x for x in intersecting_face_idx if np.sum(signed_distance[x] > 0) == 1
-            ]  # all
+            i_pos = [x for x in intersecting_face_idx if np.sum(signed_distance[x] > 0) == 1]  # all
             # triangles with one vertex on the positive part
-            i_neg = [
-                x for x in intersecting_face_idx if np.sum(signed_distance[x] < 0) == 1
-            ]  # all
+            i_neg = [x for x in intersecting_face_idx if np.sum(signed_distance[x] < 0) == 1]  # all
             # triangles with one vertex on the negative part
             p1 = []
             u = []
@@ -1258,31 +1082,18 @@ class BiventricularModel:
                 p1.append(list(res))
                 # u vectors
                 u = u + list(
-                    np.subtract(
-                        centered_vertex[
-                            faces[face_index, np.invert(pivot_point_mask)], :
-                        ],
-                        [list(res)] * 2,
-                    )
-                )
+                    np.subtract(centered_vertex[faces[face_index, np.invert(pivot_point_mask)], :], [list(res)] * 2, ))
 
             for face_index in i_neg:  # triangles where only one
                 # point on negative side
                 # pivot points
                 pivot_point_mask = signed_distance[face_index, :] < 0
                 res = centered_vertex[faces[face_index, pivot_point_mask], :][
-                    0
-                ]  # select the vertex on the negative side
+                    0]  # select the vertex on the negative side
                 p1.append(res)
                 # u vectors
                 u = u + list(
-                    np.subtract(
-                        centered_vertex[
-                            faces[face_index, np.invert(pivot_point_mask)], :
-                        ],
-                        [list(res)] * 2,
-                    )
-                )
+                    np.subtract(centered_vertex[faces[face_index, np.invert(pivot_point_mask)], :], [list(res)] * 2, ))
 
             # calculate the intersection point on each triangle side
             u = np.asarray(u).T
@@ -1305,7 +1116,7 @@ class BiventricularModel:
 
         return f_idx
 
-    def get_intersection_with_dicom_image(self, slice: Slice, surface: Surface=None) -> np.ndarray:
+    def get_intersection_with_dicom_image(self, slice: Slice, surface: Surface = None) -> np.ndarray:
         """Get the intersection contour points between the biventricular
         model with a DICOM image
 
@@ -1325,7 +1136,6 @@ class BiventricularModel:
 
         `P` (n,3) array[float] intersecting points
         """
-
         image_position = np.asarray(slice.position, dtype=float)
         image_orientation = np.asarray(slice.orientation, dtype=float)
 
@@ -1361,9 +1171,8 @@ class BiventricularModel:
         `psi_matrix` basis function matrix (`N`,`NUM_NODES`)
 
         """
-
-        data_points = np.array(data.points_coordinates)
-        data_contour_type = np.array(data.contour_type)
+        data_points = np.asarray(data.points_coordinates)
+        data_contour_type = np.asarray(data.contour_type)
         data_weights = np.array(data.weights)
         psi_matrix = []
         w = []
@@ -1379,10 +1188,10 @@ class BiventricularModel:
         for surface in Surface:
             # Trees initialization
             surface_index = self.get_surface_vertex_start_end_index(surface)
-            tree_points = self.et_pos[surface_index[0] : surface_index[1] + 1, :]
+            tree_points = self.et_pos[surface_index[0]: surface_index[1] + 1, :]
             if len(tree_points) == 0:
                 continue
-            surface_tree = scipy.spatial.cKDTree(tree_points)
+            surface_tree = cKDTree(tree_points)
 
             # loop over contours is faster, for the same contours we are using
             # the same tree, therefore the query operation can be done for all
@@ -1390,33 +1199,24 @@ class BiventricularModel:
             for contour in SURFACE_CONTOUR_MAP[surface.value]:
                 contour_points_index = np.where(data_contour_type == contour)[0]
                 contour_points = data_points[contour_points_index]
-
-                # if np.isnan(np.sum(contour_points))==True:
-                # LDT 7/03: handle error, why do I get nan in contours?
-                # continue
-
                 weights_gp = data_weights[contour_points_index]
 
                 if len(contour_points) == 0:
                     continue
 
                 if surface.value < 4:  # these are the surfaces
-                    distance, vertex_index = surface_tree.query(
-                        contour_points, k=1, p=2
-                    )
+                    distance, vertex_index = surface_tree.query(contour_points, k=1, p=2)
                     index_closest = [x + surface_index[0] for x in vertex_index]
                     # add by LDT (3/11/2021): perform preliminary operations for vertex points that are not in index
                     # instead of doing them in the 'else' below. This makes the for loop below faster.
-                    unique_index_closest = list(
-                        OrderedDict.fromkeys(index_closest)
-                    )  # creates a list of elements that are unique in index_closest
-                    dict_unique = dict(
-                        zip(unique_index_closest, range(0, len(unique_index_closest)))
-                    )  # create a dictionary = {'unique element': its list index}
+                    unique_index_closest = list(OrderedDict.fromkeys(index_closest))
+                    # creates a list of elements that are unique in index_closest
+
+                    # create a dictionary = {'unique element': its list index}
+                    dict_unique = dict(zip(unique_index_closest, range(0, len(unique_index_closest))))
                     vertex = list(dict_unique.keys())  # list of all the dictionary keys
-                    common_elm = list(
-                        set(index_unique) & set(vertex)
-                    )  # intersection between the array index_unique and the unique points in index_closest
+                    # intersection between the array index_unique and the unique points in index_closest
+                    common_elm = list(set(index_unique) & set(vertex))
 
                     def filter_new(full_list, excludes):
                         """
@@ -1426,29 +1226,23 @@ class BiventricularModel:
                         return (x for x in full_list if x not in s)
 
                     # togli gli elementi comuni
-                    index_unique.append(
-                        list(filter_new(vertex, common_elm))
-                    )  # stores the new vertices that are NOT in already in the index_unique list
-                    index_unique = flatten(index_unique)
+                    # stores the new vertices that are NOT in already in the index_unique list
+                    index_unique.append(list(filter_new(vertex, common_elm)))
+                    index_unique = [item for sublist in index_unique for item in
+                                    (sublist if isinstance(sublist, list) else [sublist])]
 
-                    items_as_dict = dict(
-                        zip(index_unique, range(0, len(index_unique)))
-                    )  # builds a dictionary = {vertices: indexes}
+                    items_as_dict = dict(zip(index_unique, range(0, len(index_unique))))
+                    # builds a dictionary = {vertices: indexes}
 
                     for i_idx, vertex_index in enumerate(index_closest):
-                        if (
-                            len(set([vertex_index]).intersection(index)) == 0
-                        ):  # changed by LDT (3/11/2021): faster
+                        if (len(set([vertex_index]).intersection(index)) == 0):  # changed by LDT (3/11/2021): faster
                             index.append(int(vertex_index))
                             data_points_index.append(contour_points_index[i_idx])
                             psi_matrix.append(basis_matrix[int(vertex_index), :])
                             w.append(weight * weights_gp[i_idx])
                             distance_d_prior.append(distance[i_idx])
-
                         else:
-                            old_idx = items_as_dict[
-                                vertex_index
-                            ]  # changed by LDT (3/11/2021)
+                            old_idx = items_as_dict[vertex_index]  # changed by LDT (3/11/2021)
                             distance_old = distance_d_prior[old_idx]
                             if distance[i_idx] < distance_old:
                                 distance_d_prior[old_idx] = distance[i_idx]
@@ -1471,7 +1265,6 @@ class BiventricularModel:
                         centroid_gp_valve = contour_points.mean(axis=0)
                         translation_gp_model = centroid_valve - centroid_gp_valve
                         translated_points = np.add(contour_points, translation_gp_model)
-
                     else:  # rv_inserts  and apex don't
                         # need to be translated
                         translated_points = contour_points
@@ -1482,24 +1275,15 @@ class BiventricularModel:
                         ContourType.AORTA_PHANTOM,
                         ContourType.TRICUSPID_PHANTOM,
                     ]:
-                        surface_tree = scipy.spatial.cKDTree(translated_points)
+                        surface_tree = cKDTree(translated_points)
                         tree_points = tree_points[:-1]
-                        distance, vertex_index = surface_tree.query(
-                            tree_points, k=1, p=2
-                        )
-                        index_closest = [
-                            x + surface_index[0] for x in range(len(tree_points))
-                        ]
+                        distance, vertex_index = surface_tree.query(tree_points, k=1, p=2)
+                        index_closest = [x + surface_index[0] for x in range(len(tree_points))]
                         weights_gp = [weights_gp[x] for x in vertex_index]
 
-                        contour_points_index = [
-                            contour_points_index[x] for x in vertex_index
-                        ]
-
+                        contour_points_index = [contour_points_index[x] for x in vertex_index]
                     else:
-                        distance, vertex_index = surface_tree.query(
-                            translated_points, k=1, p=2
-                        )
+                        distance, vertex_index = surface_tree.query(translated_points, k=1, p=2)
                         index_closest = []
                         for x in vertex_index:
                             if (x + surface_index[0]) != surface_index[1]:
@@ -1514,602 +1298,209 @@ class BiventricularModel:
                     distance_d_prior = distance_d_prior + list(distance)
                     data_points_index = data_points_index + list(contour_points_index)
 
-        return [
-            np.asarray(data_points_index),
-            np.asarray(w),
-            np.asarray(distance_d_prior),
-            np.asarray(psi_matrix),
-        ]
+        return [np.asarray(data_points_index), np.asarray(w), np.asarray(distance_d_prior), np.asarray(psi_matrix)]
 
-    def extract_linear_hex_mesh(self, reorder_nodes : bool=True) -> tuple[np.ndarray, np.ndarray]:
+    def compute_data_xi_fast(self, weight: float, data: GPDataSet):
         """
-        Compute linear hex mesh associated with control mesh topology using
-        points position from the subdivision surface.
-
-        The new position is mapped using the nodes local coordinates (within
-        element) from the subdivision surface mesh. The nodes of the new
-        hex mesh will take the corner position of the corresponding
-        control element (where xi are filed with 0 and 1 only).  The new
-        control mesh will interpolate the subdivision surface
-        at local coordinates (0,0,0),(1,0,0),(0,1,0),(1,1,0),
-        (0,0,1), (1,0,1),(0,1,1),(1,1,1).
-
-        Parameters:
-        -----------
-
-        `reorder_nodes' if true the nodes ids are reindexed
-
-        Returns
-        --------
-
-        `new_nodes_position` (NUM_NODES,3) array[float] new position of the nodes
-        `new_elements` (nbElem, 8) array mesh connectivity
-
-        """
-
-        new_elements = np.zeros_like(self.control_et_indices)
-        if reorder_nodes:
-            new_nodes_position = np.zeros_like(self.control_mesh)
-            nodes_id = np.sort(np.unique(self.control_et_indices))
-        else:
-            new_nodes_position = np.zeros_like(self.et_pos)
-        # node_maping = np.zeros(mesh.et_pos.shape[0])
-        xi_order = np.array(
-            [
-                [0, 0, 0],
-                [1, 0, 0],
-                [0, 1, 0],
-                [1, 1, 0],
-                [0, 0, 1],
-                [1, 0, 1],
-                [0, 1, 1],
-                [1, 1, 1],
-            ]
-        )
-        node_elem_map = self.et_vertex_element_num
-        node_position = self.et_pos
-        xi_position = self.et_vertex_xi
-
-        for elem_id, elem_nodes in enumerate(self.control_et_indices):
-            #
-            elem_index = np.where(np.equal(node_elem_map, elem_id))[0]
-            elem_index = elem_index.reshape(elem_index.shape[0])
-            enode_position = node_position[elem_index]
-            enode_xi = xi_position[elem_index, :]
-
-            for node_index, node in enumerate(elem_nodes):
-                index = np.prod(enode_xi == xi_order[node_index], axis=1).astype(bool)
-                if index.any():
-                    if reorder_nodes:
-                        new_node_id = np.where(nodes_id == node)[0][0]
-                    else:
-                        new_node_id = node
-                    new_nodes_position[new_node_id] = enode_position[index][0]
-                    elem_index = self.control_et_indices == node
-                    new_elements[elem_index] = new_node_id
-                    # node_maping[node] = elem_index[index][0]
-
-        return new_nodes_position, new_elements
-
-    def evaluate_derivatives(self, xi_position: np.ndarray, elements: list=None) -> tuple[list, list, np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Evaluate derivatives at xi_position within each element in *elements* list'
-
-        Parameters:
-        -----------
-
-        xi_position (n,3) array of xi positions were to estimate derivatives
-        elements: (m) list of elements were to estimate derivatives
+        Semantics-preserving, faster version of compute_data_xi:
+          - Rebuilds one KDTree per surface each call (since et_pos moves).
+          - SURFACES (<4): query all points mapped to that surface (across contours),
+            then keep the closest guide point per vertex (dedup).
+          - VALVES/LANDMARKS (>=4): keep original behavior:
+              * for PHANTOM contours: build KDTree on guide points and query vertices (minus last);
+                one guide point per vertex; no dedup across contours.
+              * for non-phantom: query surface KDTree on (optionally translated) guide points;
+                clip last vertex to s1-1; no dedup across contours.
         Returns:
-        --------
-
-        deriv (n,9): du, dv, duv, duu, dvv, dw, dvw, duw, dww, dudvdw
+          data_points_index: (N_kept,) indices into data.points_coordinates for chosen guide points
+          w:                 (N_kept,)   weights per kept correspondence
+          distance_d_prior:  (N_kept,)   distances at the chosen correspondence
+          psi_matrix:        (N_kept, NUM_NODES) basis rows at chosen vertices
         """
+        data_points = np.asarray(data.points_coordinates, dtype=np.float64)
+        data_contour_type = np.asarray(data.contour_type)
+        data_weights = np.asarray(data.weights, dtype=np.float64)
+        basis_matrix = np.asarray(self.basis_matrix, dtype=np.float64)
 
-        if not self.build_mode:
-            print(
-                "Derivatives are computed in build mode "
-                "build model with build_mode=True"
-            )
-            return
+        out_vertex_ids = []
+        out_point_idx = []
+        out_weights = []
+        out_dist = []
 
-        if elements is None:
-            elements = list(range(np.max(self.et_vertex_element_num) + 1))
+        # Rebuild a KD-tree per surface (et_pos shifts every accepted step)
+        for surface in Surface:
+            s0, s1 = self.get_surface_vertex_start_end_index(surface)
+            if s1 < s0:
+                continue
+            surf_pts = self.et_pos[s0: s1 + 1, :]
+            if surf_pts.size == 0:
+                continue
 
-        num_points = len(elements) * len(xi_position)
-        # interpolate field on surface nodes
+            # Indices of all guide points that map to this surface via SURFACE_CONTOUR_MAP
+            surface_contours = SURFACE_CONTOUR_MAP[surface.value]
+            idx_all = np.nonzero(np.isin(data_contour_type, surface_contours))[0]
+            if idx_all.size == 0:
+                continue
 
-        der_coeff = np.zeros((num_points, self.NUM_NODES, 10))
+            # Build once, use it in the non-phantom branches
+            surf_tree = cKDTree(surf_pts)
 
-        der_e, der_xi = list(), list()
+            if surface.value < 4:
+                # ---- SURFACE branch: dedup per vertex (closest distance wins) ----
+                pts = data_points[idx_all, :]
+                wts = (weight * data_weights[idx_all]).astype(np.float64)
 
-        for et_index in elements:
-            for j, xi in enumerate(xi_position):
-                xig_index = et_index * len(xi_position) + j
+                dist, vi_local = surf_tree.query(pts, k=1, p=2)  # (m,), (m,)
+                gi = vi_local + s0  # global vertex ids
 
-                _, der_coeff[xig_index, :, :], _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], et_index, 0, 0, 0
-                )
+                # Strict min-distance per vertex, tie breaks by earliest occurrence
+                # Sort by (vertex, distance, original_order)
+                order = np.arange(gi.size, dtype=np.int64)
+                sort_idx = np.lexsort((order, dist, gi))
+                gi_s = gi[sort_idx]
+                # first element of each new vertex group
+                keep_sorted = np.empty_like(gi_s, dtype=bool)
+                keep_sorted[0] = True
+                keep_sorted[1:] = gi_s[1:] != gi_s[:-1]
+                keep_idx = sort_idx[keep_sorted]
 
-                der_e.append(et_index)
-                der_xi.append(xi)
+                out_vertex_ids.append(gi[keep_idx])
+                out_point_idx.append(idx_all[keep_idx])
+                out_weights.append(wts[keep_idx])
+                out_dist.append(dist[keep_idx])
 
-        bxe = np.zeros((num_points, 10))
-        bye = np.zeros((num_points, 10))
-        bze = np.zeros((num_points, 10))
+            else:
+                # ---- VALVE / LANDMARK branch: preserve original behavior, no dedup ----
+                # Process each contour independently (as in your code)
+                for contour in SURFACE_CONTOUR_MAP[surface.value]:
+                    idx_c = np.nonzero(data_contour_type == contour)[0]
+                    if idx_c.size == 0:
+                        continue
 
-        for i in range(10):
-            bxe[:, i] = np.dot(der_coeff[:, :, i], self.control_mesh[:, 0])
-            bye[:, i] = np.dot(der_coeff[:, :, i], self.control_mesh[:, 1])
-            bze[:, i] = np.dot(der_coeff[:, :, i], self.control_mesh[:, 2])
+                    pts = data_points[idx_c, :].copy()
+                    wts = (weight * data_weights[idx_c]).astype(np.float64)
 
-        return der_e, der_xi, bxe, bye, bze
+                    # Translate for 4..7 (valves w/o apex/inserts)
+                    if 4 <= surface.value < 8:
+                        centroid_valve = self.et_pos[s1]
+                        centroid_gp = pts.mean(axis=0)
+                        pts += (centroid_valve - centroid_gp)[None, :]
 
-    def evaluate_basis_matrix(
-        self, s, t, u, elem_number, displacement_s=0, displacement_t=0, displacement_u=0
-    ):
-        """Evaluates position  and derivatives coefficients (basis function)
-        matrix for a  local coordinate(s, t, u)
-        (it is not a surface point) for the element elem_number.
-
-        Notes
-        ------
-        Global coordinates of the point is obtained by dot product between
-        position coefficients and control matrix
-
-        Global surface derivatives at the given point is given by the dot
-        product of the derivatives coefficients and the control matrix
-
-        Parameters
-        -----------
-        `s` float between 0 and 1 local coordinate
-        `t` float between 0 and 1 local coordinate
-        `u` float between 0 and 1 local coordinate
-
-        `elem_number` int element number in the control mesh
-        (coarse mesh 186 elements )
-        `displacement_s` float for finite difference calculation only (D-affine
-        reg)
-        `displacement_t` float for finite difference calculation only (D-affine
-        reg)
-
-        `displacement_u` float for finite difference calculation only (D-affine
-        reg)
-
-
-        Returns
-        --------
-
-        `full_matrix_coefficient_points` rows = number of data points
-                                        columns = basis functions
-                                        size = number of data points x 16
-
-        `full_matrix_coefficient_der` (i, j, k) basis function for ith data
-        point, jth basis fn, kth derivatives; size = number of  data  points
-        x 16 x 5:  du, dv, duv, duu, dvv, dw, dvw, duw, dww, dudvdw
-
-        `control_points` 16 control points B-spline
-
-
-        """
-        if not self.build_mode:
-            print(
-                "To evaluate gauss points the model should be "
-                "read with build_mode=True"
-            )
-            return
-
-        # Allocate memory
-        params_per_element = 32
-        pWeights = np.zeros((params_per_element))  # weights
-        dWeights = np.zeros((params_per_element, 10))  # weights derivatives
-
-        matrix_coefficient_Bspline_points = np.zeros(params_per_element)
-        matrix_coefficient_Bspline_der = np.zeros((params_per_element, 10))
-        full_matrix_coefficient_points = np.zeros((self.NUM_NODES))
-        full_matrix_coefficient_der = np.zeros((self.NUM_NODES, 10))
-
-        # The b-spline weight of a point is computed giving local coordinates
-        # with respect to the 'child patches' elements. The input local
-        # coordinates are given with respect to the control grid element
-
-        # Local coordinates of the 'child' patches  are constant and
-        # therefore they were precomputed and stored in patch_coordinates
-        # and 'fraction` files. They will be later used to interpolate
-        # 'patch' local coordinates (within surface element)
-        # form 'face' local coordinates (within control grid element)
-
-        # Find projection into endo and epi surfaces
-
-        ps = np.zeros(2)  # local coordinate in the child patch
-        pt = np.zeros(2)  # local coordinate in the child patch
-        fract = np.zeros(2)
-        boundary_value = np.zeros(2)
-        b_spline_support = np.ones((2, self.b_spline.shape[1]))
-        # select surface vertices associated with the given element number (
-        # control mesh)
-        # The element number is defined in the coarse mesh
-        index_verts = self.et_vertex_element_num[:] == elem_number
-
-        for surface in range(2):  # s= 0 for endo surface and s = 1 for epi
-            # surface
-            # select vertices from the surface
-            index_surface = self.et_vertex_xi[:, 2] == surface
-            element_verts_xi = self.et_vertex_xi[
-                np.logical_and(index_surface, index_verts), :2
-            ]
-
-            if len(element_verts_xi) > 0:
-                # find the closest surface point
-                elem_tree = cKDTree(element_verts_xi)
-                ditance, closest_vertex_id = elem_tree.query([s, t])
-                index_surface = np.where(np.logical_and(index_surface, index_verts))[0][
-                    closest_vertex_id
-                ]
-
-                # translate face to patch coordinates
-
-                if self.fraction[index_surface] != 0:
-                    ps[surface] = (
-                        s + displacement_s - element_verts_xi[closest_vertex_id, 0]
-                    ) / self.fraction[index_surface] + self.patch_coordinates[
-                        index_surface, 0
-                    ]
-                    pt[surface] = (
-                        t + displacement_t - element_verts_xi[closest_vertex_id, 1]
-                    ) / self.fraction[index_surface] + self.patch_coordinates[
-                        index_surface, 1
-                    ]
-                    b_spline_support[surface] = self.b_spline[index_surface, :]
-
-                    boundary_value[surface] = self.boundary[index_surface]
-
-                    fract[surface] = 1 / self.fraction[index_surface]
-
-            elif elem_number > 166:
-                # some surface nodes are not needed for the
-                # definition of the biventricular 2D surface therefore they are
-                # not include in the surface node matrix. However they are
-                # necessary for the 3D interpolation (septum area).
-                # these elements are called the phantom points and the
-                # corresponding information as the sudivision level ,
-                # patch coordinates etc are stored in phantom points array.
-                index_phantom = self.phantom_points[:, 0] == elem_number
-                elem_phantom_points = self.phantom_points[index_phantom, :]
-                elem_vertex_xi = np.stack(
-                    (elem_phantom_points[:, 21], elem_phantom_points[:, 22])
-                ).T
-
-                elem_tree = cKDTree(elem_vertex_xi)
-                ditance, closest_vertex_id = elem_tree.query([s, t])
-
-                if elem_phantom_points[closest_vertex_id, 24] != 0:
-                    boundary_value[surface] = elem_phantom_points[closest_vertex_id, 17]
-                    fract[surface] = 1 / elem_phantom_points[closest_vertex_id, 24]
-
-                    ps[surface] = (
-                        s + displacement_s - elem_phantom_points[closest_vertex_id, 21]
-                    ) / elem_phantom_points[
-                        closest_vertex_id, 24
-                    ] + elem_phantom_points[
-                        closest_vertex_id, 18
-                    ]
-                    pt[surface] = (
-                        t + displacement_t - elem_phantom_points[closest_vertex_id, 22]
-                    ) / elem_phantom_points[
-                        closest_vertex_id, 24
-                    ] + elem_phantom_points[
-                        closest_vertex_id, 19
-                    ]
-                    b_spline_support[surface] = elem_phantom_points[
-                        closest_vertex_id, 1:17
-                    ].astype(int)
-
-        u1 = u + displacement_u
-        # normalize s, t coordinates
-        control_points = np.concatenate((b_spline_support[0], b_spline_support[1]))
-        if len(control_points) < 32:
-            print("stop")
-        # Uniform B - Splines basis functions
-        sWeights = np.zeros((4, 2))
-        tWeights = np.zeros((4, 2))
-        uWeights = np.zeros(2)
-        # Derivatives of the B - Splines basis functions
-        ds = np.zeros((4, 2))
-        dt = np.zeros((4, 2))
-        du = np.zeros(2)
-        # Second derivatives of the B - Splines basis functions
-        dss = np.zeros((4, 2))
-        dtt = np.zeros((4, 2))
-
-        # populate arrays
-        for surface in range(2):
-            sWeights[:, surface] = basis_function_bspline(ps[surface])
-            tWeights[:, surface] = basis_function_bspline(pt[surface])
-
-            ds[:, surface] = der_basis_function_bspline(ps[surface])
-            dt[:, surface] = der_basis_function_bspline(pt[surface])
-
-            dss[:, surface] = der2_basis_function_bspline(ps[surface])
-            dtt[:, surface] = der2_basis_function_bspline(pt[surface])
-
-            # Adjust the boundaries
-            sWeights[:, surface], tWeights[:, surface] = adjust_boundary_weights(
-                boundary_value[surface], sWeights[:, surface], tWeights[:, surface]
-            )
-
-            ds[:, surface], dt[:, surface] = adjust_boundary_weights(
-                boundary_value[surface], ds[:, surface], dt[:, surface]
-            )
-
-            dss[:, surface], dtt[:, surface] = adjust_boundary_weights(
-                boundary_value[surface], dss[:, surface], dtt[:, surface]
-            )
-
-        uWeights[0] = 1 - u1  # linear interpolation
-        uWeights[1] = u1  # linear interpolation
-
-        du[0] = -1
-        du[1] = 1
-
-        # Weights of the 16 tensors B - spline basis functions and their derivatives
-        for k in range(2):
-            for i in range(4):
-                for j in range(4):
-                    index = 16 * k + 4 * i + j
-                    pWeights[index] = sWeights[j, k] * tWeights[i, k] * uWeights[k]
-
-                    dWeights[index, 0] = (
-                        ds[j, k] * tWeights[i, k] * fract[k] * uWeights[k]
+                    is_phantom = contour in (
+                        ContourType.MITRAL_PHANTOM,
+                        ContourType.PULMONARY_PHANTOM,
+                        ContourType.AORTA_PHANTOM,
+                        ContourType.TRICUSPID_PHANTOM,
                     )
 
-                    # dScale; % dphi / du = 2 ^ (p * n) * dx, where
-                    #  n = level of the patch(0, 1 or 2) and p = order of differentiation.Here
-                    #  p = 1 and n = 1 / biv_model.fraction(indx)
-                    dWeights[index, 1] = (
-                        sWeights[j, k] * dt[i, k] * fract[k] * uWeights[k]
-                    )
+                    if is_phantom:
+                        # Inverted query: build KDTree on (translated) guide points, query surface vertices (except last)
+                        nvert = surf_pts.shape[0]
+                        if nvert <= 1:
+                            continue  # matches original, nothing to add
+                        query_tp = surf_pts[:-1, :]  # drop last vertex
+                        global_vid = np.arange(s0, s0 + nvert - 1, dtype=np.int64)
 
-                    dWeights[index, 2] = (
-                        ds[j, k] * dt[i, k] * (fract[k] ** 2) * uWeights[k]
-                    )
+                        guide_tree = cKDTree(pts)
+                        dist, vi_guide = guide_tree.query(query_tp, k=1, p=2)  # pick a guide point per vertex
+                        gp_sel = idx_c[vi_guide]  # global point indices
+                        w_sel = (weight * data_weights[gp_sel]).astype(np.float64)
 
-                    dWeights[index, 3] = (
-                        dss[j, k] * tWeights[i, k] * (fract[k] ** 2) * uWeights[k]
-                    )
+                        out_vertex_ids.append(global_vid)
+                        out_point_idx.append(gp_sel)
+                        out_weights.append(w_sel)
+                        out_dist.append(dist.astype(np.float64))
 
-                    dWeights[index, 4] = (
-                        sWeights[j, k] * dtt[i, k] * (fract[k] ** 2) * uWeights[k]
-                    )
+                    else:
+                        # Normal landmark path: query surface KDTree for each (translated) guide point
+                        dist, vi_local = surf_tree.query(pts, k=1, p=2)
+                        gi = vi_local + s0
+                        # if equals s1, replace with s1-1 (guard single-vertex case)
+                        if s1 > s0:
+                            gi = np.where(gi == s1, s1 - 1, gi).astype(np.int64)
+                        else:
+                            gi = gi.astype(np.int64)
 
-                    dWeights[index, 5] = sWeights[j, k] * tWeights[i, k] * du[k]
+                        out_vertex_ids.append(gi)
+                        out_point_idx.append(idx_c)
+                        out_weights.append(wts)
+                        out_dist.append(dist.astype(np.float64))
 
-                    dWeights[index, 6] = sWeights[j, k] * dt[i, k] * du[k] * fract[k]
+        # Concatenate in lock-step
+        if out_vertex_ids:
+            vertex_ids = np.concatenate(out_vertex_ids)
+            point_ids = np.concatenate(out_point_idx)
+            weights_kept = np.concatenate(out_weights).astype(np.float64, copy=False)
+            dist_kept = np.concatenate(out_dist).astype(np.float64, copy=False)
+        else:
+            vertex_ids = np.empty((0,), dtype=np.int64)
+            point_ids = np.empty((0,), dtype=np.int64)
+            weights_kept = np.empty((0,), dtype=np.float64)
+            dist_kept = np.empty((0,), dtype=np.float64)
 
-                    dWeights[index, 7] = ds[j, k] * tWeights[i, k] * du[k] * fract[k]
+        # Sanity: all have same length
+        N = vertex_ids.shape[0]
+        assert point_ids.shape[0] == N and weights_kept.shape[0] == N and dist_kept.shape[0] == N, \
+            f"Length mismatch: verts={N}, pts={point_ids.shape[0]}, w={weights_kept.shape[0]}, d={dist_kept.shape[0]}"
 
-                    dWeights[index, 8] = 0  # % linear interpolation --> duu = 0
-                    dWeights[index, 9] = ds[j, k] * dt[i, k] * (fract[k] ** 2) * du[k]
+        # Basis rows for kept vertices
+        psi = basis_matrix[vertex_ids, :]
 
-            # add weights
-        for i in range(32):
-            matrix_coefficient_Bspline_points[i] = pWeights[i]
-            full_matrix_coefficient_points = (
-                full_matrix_coefficient_points
-                + pWeights[i] * self.local_matrix[int(control_points[i]), :]
-            )
-            for k in range(10):
-                matrix_coefficient_Bspline_der[i, k] = dWeights[i, k]
-                full_matrix_coefficient_der[:, k] = (
-                    full_matrix_coefficient_der[:, k]
-                    + dWeights[i, k] * self.local_matrix[int(control_points[i]), :]
-                )
+        # Return (data_points_index, w, distance_d_prior, psi_matrix)
+        return point_ids.astype(np.int64), weights_kept, dist_kept, psi
 
-        return (
-            full_matrix_coefficient_points,
-            full_matrix_coefficient_der,
-            control_points,
-        )
+    def copy(self):
+        """Lightweight copy: share constants; copy only arrays that mutate."""
+        new = self.__class__.__new__(self.__class__)  # bypass __init__
 
-    def compute_local_cs(self, position: list, element_number: int=None) -> None:
-        """Computes local coordinates system at any point of the subdivision
-        surface. x1 - circumferential direction, x2- longitudinal direction,
-        x3- transmural direction
+        # 1) copy small scalars/flags
+        for name in self._INPUT_MUTABLES:
+            if hasattr(self, name):
+                val = getattr(self, name)
+                # sets/dicts should be shallow-copied if present
+                if isinstance(val, (set, dict, list)):
+                    val = val.copy()
+                setattr(new, name, val)
 
-        Parameters
-        ------------
+        # 2) share big immutable arrays (no copy)
+        for name in self._CONST_ARRAYS:
+            if hasattr(self, name):
+                setattr(new, name, getattr(self, name))
 
-        `position` list of (3,1) arrays[float] with xi coordinates
+        # 3) copy mutable arrays
+        if hasattr(self, "control_mesh"):
+            new.control_mesh = self.control_mesh.copy()
+        else:
+            new.control_mesh = None
 
-        `element_number` index of the control elements (coarse mesh). if non
-        is specified the local cs is computed for all elements
+        # Recompute or copy derived state
+        if hasattr(self, "matrix") and new.control_mesh is not None:
+            # et_pos is derived from matrix @ control_mesh; compute to stay correct
+            new.et_pos = self.matrix @ new.control_mesh
+        elif hasattr(self, "et_pos"):
+            # fallback: copy if present
+            new.et_pos = self.et_pos.copy()
 
-        Return
-        -------
+        return new
 
-        """
-        # todo method not tested
-        if not self.build_mode:
-            print(
-                "field evaluation is performed in build mode "
-                "build model with build_mode=True"
-            )
-            return
+    # Optional: make Python's copy/deepcopy use the fast path
+    def __copy__(self):
+        return self.copy()
 
-        if element_number is None:
-            element_number = np.array(range(np.max(self.et_vertex_element_num)))
+    def __deepcopy__(self, memo):
+        # still use lightweight copy; only duplicates the truly mutable bits
+        return self.copy()
 
-        dxi = 0.01
+    # Optional: shrink pickles (great for multiprocessing)
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Drop/recompute-ables to reduce pickle size
+        state.pop("et_pos", None)
+        # If collision_detection/sets are large and recomputable, consider dropping here too
+        return state
 
-        basis_matrix = np.zeros((len(element_number) * len(position), self.NUM_NODES))
-        basis_matrix_dx1 = np.zeros(
-            (len(element_number) * len(position), self.NUM_NODES)
-        )
-        basis_matrix_dx2 = np.zeros(
-            (len(element_number) * len(position), self.NUM_NODES)
-        )
-        basis_matrix_dx3 = np.zeros(
-            (len(element_number) * len(position), self.NUM_NODES)
-        )
-        for et_indx, control_et in enumerate(element_number):
-            for j, xi in enumerate(position):
-                g_indx = et_indx * len(position) + j
-                # basis matrix for node position
-                basis_matrix[g_indx, :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], control_et, 0, 0, 0
-                )
-
-                # basis matrix for node position with increment of dxi in x1
-                # direction
-                basis_matrix_dx1[g_indx, :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], control_et, dxi, 0, 0
-                )
-
-                # basis matrix for node position with increment of dxi in x2
-                # direction
-                basis_matrix_dx2[g_indx, :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], control_et, 0, dxi, 0
-                )
-
-                # basis matrix for node position with increment of dxi in x1
-                # direction
-                basis_matrix_dx3[g_indx, :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], control_et, 0, 0, dxi
-                )
-
-                # todo The local cs is computed by 1) dot product with control
-                # matrix to compute node position. 2) subtract points to
-                # compute the corresponding vectors
-
-    def evaluate_surface_field(self, field: np.ndarray, vertex_map: list) -> np.ndarray:
-        """Evaluate field at the each surface points giving a sparse field
-        defined at a subset of surface points.
-
-        Notes
-        ------
-
-        Input surface field need to have more than 388 points evenly spread
-        on the subdivided surface. A good choice is to define the filed at
-        each surface point with each xi coordinate equal to 0 or 1
-
-        Parameters
-        -----------
-
-        `field` (NUM_NODES, k) array[float] field to be interpolated
-
-        `vertex_map` (NUM_NODES,1) array[ints] nodes id where the field is
-        defined
-
-        Returns
-        --------
-
-        `interpolated_field` (NUM_SURFACE_NODES, k) array[float] interpolated
-        field at each surface node
-
-        """
-        if not self.build_mode:
-            print(
-                "field evaluation is performed in build mode "
-                "build model with build_mode=True"
-            )
-            return
-
-        basis_matrix = np.zeros((len(vertex_map), self.NUM_NODES))
-
-        # first estimate the control points from the known fields
-        for v_index, v in enumerate(vertex_map):
-            xi = self.et_vertex_xi[v]
-            et_index = self.et_vertex_element_num[v]
-
-            basis_matrix[v_index, :], _, _ = self.evaluate_basis_matrix(
-                xi[0], xi[1], xi[2], et_index, 0, 0, 0
-            )
-
-        control_points = np.linalg.solve(basis_matrix, field)
-
-        # interpolate field on surface nodes
-        basis_matrix = np.zeros((self.NUM_SURFACE_NODES, self.NUM_NODES))
-        for et_index in range(np.max(self.et_vertex_element_num) + 1):
-            xig_index = np.where(self.et_vertex_element_num == et_index)[0]
-            xig = self.et_vertex_xi[xig_index]
-            for j, xi in enumerate(xig):
-                basis_matrix[xig_index[j], :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], et_index, 0, 0, 0
-                )
-
-        interpolated_field = np.dot(basis_matrix, control_points)
-
-        return interpolated_field
-
-    def evaluate_field(self, field: np.ndarray, vertex_map: list, position: np.ndarray, elements: list=None) -> tuple[np.ndarray, np.ndarray]:
-        """Evaluates field at the each xi position within a element of the
-        control grid
-
-        Notes
-        ------
-
-        Input surface field need to have more than 388 points evenly spread
-        on the subdivided surface. A good choice is to define the filed at
-        each surface point with each xi coordinate equal to 0 or 1
-
-        Parameters
-        -----------
-
-        `field` (`NUM_NODES`,k) matrix[float] field to be interpolated
-
-        `vertex_map` ('NUM_NODES`) vector[ints] nodes id where the field is
-        defined
-
-        `position` (m,3) array[float] xi position where the field need to
-        be interpolated
-
-        `elements` list[int] list of elements (control grid) where the field
-        need to be interpolated. If not specified the field is interfolated
-        for all elements
-
-        Returns
-        ---------
-
-        `interpolated_field` (N, k) matrix[float] interpolated field at each
-        point. Where N = len(`elements')*len(position) and k=field.shape[1]
-
-        `interpolated_points` (N,3) matrix[float] interpolated field at each
-        point. Where N = len(`elements')*len(position)
-
-        """
-        if not self.build_mode:
-            print(
-                "field evaluation is performed in build mode "
-                "build model with build_mode=True"
-            )
-            return
-        if elements is None:
-            elements = list(range(np.max(self.et_vertex_element_num) + 1))
-
-        basis_matrix = np.zeros((len(vertex_map), self.NUM_NODES))
-
-        # first estimate the control points from the known fiels
-        for v_index, v in enumerate(vertex_map):
-            xi = self.et_vertex_xi[v]
-            et_index = self.et_vertex_element_num[v]
-
-            basis_matrix[v_index, :], _, _ = self.evaluate_basis_matrix(
-                xi[0], xi[1], xi[2], et_index, 0, 0, 0
-            )
-
-        control_points = np.linalg.solve(basis_matrix, field)
-
-        # interpolate field on surface nodes
-
-        basis_matrix = np.zeros((len(elements) * len(position), self.NUM_NODES))
-        for i, et_index in enumerate(elements):
-            for j, xi in enumerate(position):
-                index = i * len(position) + j
-                basis_matrix[index, :], _, _ = self.evaluate_basis_matrix(
-                    xi[0], xi[1], xi[2], et_index, 0, 0, 0
-                )
-
-        interpolated_field = np.dot(basis_matrix, control_points)
-        points = np.dot(basis_matrix, self.control_mesh)
-
-        return points, interpolated_field
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Restore derived arrays cheaply
+        if getattr(self, "matrix", None) is not None and getattr(self, "control_mesh", None) is not None:
+            self.et_pos = self.matrix @ self.control_mesh

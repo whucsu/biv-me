@@ -306,7 +306,7 @@ usage: compute_global_longitudinal_strain.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_P
 
 
 #### **Example Usage**
-Example data is available in `example/fitted-models/default`. To compute the circuferential strains using this data, run the following command:
+Example data is available in `example/fitted-models/default`. To compute the circumferential strains using this data, run the following command:
 
 ```python
 cd src/bivme/analysis
@@ -325,13 +325,13 @@ The output file will look like this:
 
 
 
-### Calculating wall thickness from models <br>
+### Calculating wall thickness from models
 The script computing the wall thickness can be found in src/bivme/analysis. Wall thickness is calculated on binary 3D images using [pyezzi](https://pypi.org/project/pyezzi/) for both LV and RV separately. The septal wall is included in the LV calculation and excluded from the RV. 
 
 To run the `compute_wall_thickness.py` script, use the following command:
 
 ```bash
-usage: compute_global_circumferential_strain.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_PATH] [-b BIV_MODEL_FOLDER] [-pat PATTERNS] [-r VOXEL_RESOLUTION] [-s SAVE_SEGMENTATION_FLAG]
+usage: compute_wall_thickness.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_PATH] [-b BIV_MODEL_FOLDER] [-pat PATTERNS] [-r VOXEL_RESOLUTION] [-s SAVE_SEGMENTATION_FLAG]
  ```
 
 | **Argument**          | **Description**                                                                               |
@@ -380,14 +380,9 @@ usage: detect_intersection.py [-h] [-config CONFIG_FILE]
 | **Argument**          | **Description**                                                                               |
 | --------------------- | --------------------------------------------------------------------------------------------- 
 | `-h, --help`          | Displays the help message and exits.                                                          |
-| `-mdir MODEL_DIR`     | Specifies the path to the directory containing the biv-me models.                      |
-| `-o OUTPUT_PATH`      | Specifies the directory where the output files will be saved.                                 |
-| `-b BIV_MODEL_FOLDER` | Path to the folder containing the subdivision matrices for the models (default: `src/model`). |
-| `-pat PATTERNS`       | The folder pattern to include for processing. You can use wildcards (default: `*`).           |
-| `-r VOXEL_RESOLUTION`        | Voxel resolution to compute the masks.                                        |
-| `-s SAVE_SEGMENTATION_FLAG` | Boolean flag indicating whether to save 3D masks
+| `-config CONFIG_FILE`     | Path to config file describing which modules to run and their associated parameters.                   
 
-The config file should be the one used to fit the original models. Refitted models will be saved in config["output_fitting"]["output_directory"]/corrected_models.
+The config file should be the one used to fit the original models. Refitted models will be saved in config["output_fitting"]["output_directory"].
 
 ## FAQs
 ### *How often will the deep learning models be updated?*
