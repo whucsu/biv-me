@@ -264,7 +264,7 @@ def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix:
             figure = go.Figure(data=data)
             figure.update_layout(
                 paper_bgcolor='white',                
-                title=f"Guidepoints for {case} - Frame {num:03}",
+                title=f"Plot for {case} - Frame {num:03}",
             )
             figure.update_scenes(xaxis_visible=False, yaxis_visible=False,zaxis_visible=False)
 
@@ -280,7 +280,7 @@ def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix:
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='This script generates a HTML plot of guidepoints and fitted models for given cases.')
+    parser = argparse.ArgumentParser(description='This script generates an HTML plot of guidepoints and fitted models for given cases.')
     parser.add_argument('-o', '--output_folder', type=Path, default="./html",
                         help='Path to the output folder')
     parser.add_argument('-gp', '--gp_directory', type=Path, 
