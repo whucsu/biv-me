@@ -29,14 +29,39 @@ class SliceViewer:
     def get_segmentations(self):
         segmentations = []
 
-        segmentation = os.path.join(self.segmentation_folder, self.view, f"{self.view}_3d_{self.sliceID}.nii.gz")
+        segmentation = os.path.join(self.segmentation_folder, self.view, 'uncropped', f"{self.view}_3d_{self.sliceID}.nii.gz")
         segmentation = nib.load(segmentation).get_fdata()
-        segmentation = np.transpose(segmentation, (1, 0, 2))
+
         for i in range(0,segmentation.shape[2]):
             segmentations.append(segmentation[:,:,i])
 
         self.size = segmentations[0].shape
+        
         return segmentations
+    
+    def qc_segmentations(self):
+        corrected_segmentations = []
+        new_segmentation = np.zeros((self.size[0], self.size[1], len(self.phases)))
+
+        for i in range(len(self.phases)):
+            seg = self.segmentations[i]
+            corrected_seg = contouring.qc_segmentation(seg, self.view)
+            corrected_segmentations.append(corrected_seg)
+            new_segmentation[:,:,i] = corrected_seg
+
+        new_segmentation = new_segmentation.astype(np.uint8)
+
+        # new_segmentation = np.transpose(new_segmentation, (1, 0, 2)) # TODO: Check if transpose is needed
+
+        # Save corrected segmentations to nii file
+        if not os.path.exists(os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected')):
+            os.makedirs(os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected'), exist_ok=True)
+
+        segmentation_path = os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected', f"{self.view}_3d_{self.sliceID}.nii.gz")
+        nib.save(nib.Nifti1Image(new_segmentation.astype(np.uint8), affine=np.eye(4)), segmentation_path)
+
+        # Update segmentations
+        return corrected_segmentations
     
     def get_initial_landmarks(self):
         self.get_landmarks_from_intersections()

@@ -11,7 +11,6 @@ def write_sliceinfofile(dst, slice_info_df):
             sliceID = int(row['Slice ID'])
             file = row['File']
             file = os.path.basename(file)
-            view = row['View']
             imagePositionPatient = row['ImagePositionPatient']
             imageOrientationPatient = row['ImageOrientationPatient']
             pixelSpacing = row['Pixel Spacing']
@@ -32,47 +31,94 @@ def write_nifti(slice_id, pixel_array, pixel_spacing, input_folder, view):
     img = pixel_array.astype(np.float32)
     # Transpose so that the last dimension is the number of frames
     img = np.transpose(img, (1, 2, 0))
-    # Transpose width and height
-    img = np.transpose(img, (1, 0, 2))
 
-    # Pad to square
-    max_dim = max(img.shape)
-    pad = [(0, 0), (0, 0), (0, 0)]
-    pad[0] = (0, max_dim - img.shape[0])
-    pad[1] = (0, max_dim - img.shape[1])
-    img = np.pad(img, pad, mode='constant', constant_values=0)
+    ## Method for Datasets 260-264
+    # Resize to 1x1 mm pixel spacing
+    current_spacing = pixel_spacing
+    if current_spacing[0] != 1 or current_spacing[1] != 1:
+        new_img = np.zeros((int(img.shape[0] * pixel_spacing[0]), int(img.shape[1] * pixel_spacing[1]), img.shape[2]), dtype=img.dtype)
+        new_shape = new_img.shape
+        if new_img.shape[0] < 256 or new_img.shape[1] < 256:
+            ratio = max(256 / new_img.shape[0], 256 / new_img.shape[1])
+            new_shape = (int(np.ceil(new_img.shape[0] * ratio)), int(np.ceil(new_img.shape[1] * ratio)), new_img.shape[2])
+            new_img = np.zeros(new_shape, dtype=img.dtype)
+        else:
+            ratio = 1
+        for frame in range(img.shape[2]):
+            new_img[:, :, frame] = cv2.resize(img[:, :, frame], (new_img.shape[1], new_img.shape[0]), interpolation=cv2.INTER_CUBIC)
 
-    # Pad to 256x256, or resize to 256x256 if it's larger
-    current_dims = img.shape
-    if current_dims[0] < 256 or current_dims[1] < 256:
-        # Pad to 256x256, adding in opposite corner to origin
-        pad = [(0, 256 - current_dims[0]), (0, 256 - current_dims[1]), (0, 0)]
-        img = np.pad(img, pad, mode='constant', constant_values=0)
-        rescale_factor = 1
+    rescale_factor = 1/(current_spacing[0] * ratio)
 
-    elif current_dims[0] > 256 or current_dims[1] > 256:
-        # Resize to 256x256
-        rescale_factor = max(current_dims[0], current_dims[1]) / 256 # Need to change pixel spacing accordingly
-        img = cv2.resize(img, (256, 256), interpolation=cv2.INTER_CUBIC)
-    
+    # Crop
+    img = new_img
+    orig_img = img.copy()
+    # Apply center crop of 256x256
+    target_size = 256
+    original_shape = img.shape
+    new_shape = list(original_shape)
+
+    if original_shape[0] < original_shape[1]:
+        new_shape[0] = target_size
+        new_shape[1] = target_size
     else:
-        rescale_factor = 1
+        new_shape[0] = target_size
+        new_shape[1] = target_size
 
-    # Remap pixel values to 0-255
-    img = img - np.min(img)
-    img = img / np.max(img) * 255
-    img = img.astype(np.uint8)
+    new_img = np.zeros((int(new_shape[0]), int(new_shape[1]), int(new_shape[2])))
+    start_x = (original_shape[0] - target_size) // 2
+    start_y = (original_shape[1] - target_size) // 2
+
+    for i in range(img.shape[2]):
+        slice_img = img[:,:,i]
+        cropped_slice = slice_img[start_x:start_x+target_size, start_y:start_y+target_size]
+        new_img[:,:,i] = cropped_slice
+
+    img = new_img
+
+    ## Method for Datasets 260-264
+    # Normalise intensity values
+    new_img = np.zeros_like(img)
+    for frame in range(img.shape[2]):
+        slice_data = img[:, :, frame]
+
+        min_value = min(0, np.min(slice_data))
+        slice_data += abs(min_value)  # Shift to make all values positive because CLAHE requires uint type (0-)
+
+        # Apply CLAHE
+        clahe = cv2.createCLAHE(tileGridSize=(1,1)) 
+        slice_data_clahe = clahe.apply(slice_data.astype(np.uint16))
+        slice_data = slice_data_clahe
+
+        # # Apply 1-99 percentile clipping
+        p1 = np.percentile(slice_data, 0.5)
+        p99 = np.percentile(slice_data, 99.5)
+        slice_data = np.clip(slice_data, p1, p99)
+
+        # Z-score normalisation (unmasked)
+        mean_intensity = np.mean(slice_data)
+        std_intensity = np.std(slice_data)
+        slice_data_normalised = (slice_data - mean_intensity) / std_intensity
+        new_img[:, :, frame] = slice_data_normalised
+
+    img = new_img
 
     affine = np.eye(4) # Default pixel spacing is 1,1,1. This is what the segmentation model expects
 
+    orig_img_nii = nib.Nifti1Image(orig_img, affine)
+    # Make original image folder if doesn't exist
+    os.makedirs(os.path.join(input_folder, view, 'resized'), exist_ok=True)
+    nib.save(orig_img_nii, os.path.join(input_folder, view, 'resized', '{}_3d_{}_0000.nii.gz'.format(view, slice_id)))
+
     img_nii = nib.Nifti1Image(img, affine)
-    nib.save(img_nii, os.path.join(input_folder, view, '{}_3d_{}_0000.nii.gz'.format(view, slice_id)))
+    # Make processed image folder if doesn't exist
+    os.makedirs(os.path.join(input_folder, view, 'resized-cropped-normalised'), exist_ok=True)
+    nib.save(img_nii, os.path.join(input_folder, view, 'resized-cropped-normalised', '{}_3d_{}_0000.nii.gz'.format(view, slice_id)))
 
     return rescale_factor
 
 def resample_img(dst, view, series, num_phases, my_logger):
     # Load 3D nifti
-    img = nib.load(os.path.join(dst, 'images', view, '{}_3d_{}_0000.nii.gz'.format(view, series)))
+    img = nib.load(os.path.join(dst, 'images', view, 'resized', '{}_3d_{}_0000.nii.gz'.format(view, series)))
     img_array = img.get_fdata()
 
     # Need to resample last dimension to num_phases
@@ -80,16 +126,15 @@ def resample_img(dst, view, series, num_phases, my_logger):
 
     # Apply spline interpolation in the temporal dimension
     new_img_array = ndimage.zoom(img_array, (1, 1, num_phases/current_phases), order=3) # Order 3 is cubic spline
-    new_img_array = new_img_array.astype(np.uint8)
 
     # Save as 3D nii
     affine = img.affine
     new_nii = nib.Nifti1Image(new_img_array, affine)
-    nib.save(new_nii, os.path.join(dst, 'images', view, '{}_3d_{}_0000.nii.gz'.format(view, series)))
+    nib.save(new_nii, os.path.join(dst, 'images', view, 'resized', '{}_3d_{}_0000.nii.gz'.format(view, series)))
 
 def resample_seg(dst, view, series, num_phases, my_logger):
     # Load 3D nifti
-    seg = nib.load(os.path.join(dst, 'segmentations', view, '{}_3d_{}.nii.gz'.format(view, series)))
+    seg = nib.load(os.path.join(dst, 'segmentations', view, 'uncropped', '{}_3d_{}.nii.gz'.format(view, series)))
     seg_array = seg.get_fdata()
 
     # Need to resample last dimension to num_phases
@@ -102,7 +147,8 @@ def resample_seg(dst, view, series, num_phases, my_logger):
     # Save as 3D nii
     affine = seg.affine
     new_nii = nib.Nifti1Image(new_seg_array, affine)
-    nib.save(new_nii, os.path.join(dst, 'segmentations', view, '{}_3d_{}.nii.gz'.format(view, series)))
+
+    nib.save(new_nii, os.path.join(dst, 'segmentations', view, 'uncropped', '{}_3d_{}.nii.gz'.format(view, series)))
 
 def clean_text(string):
 
