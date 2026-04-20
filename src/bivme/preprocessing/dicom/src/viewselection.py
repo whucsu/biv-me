@@ -219,23 +219,23 @@ class ViewSelector:
             series_description = series_rows['Series Description'].values[0]
 
             if not np.all(same_position):
-                # Sort the merged series in a consistent order based on Slice Location and Instance Number (helps to create more intuitive layout when in GUI)
+                # Sort the merged series in a consistent order based on Slice Location and Instance Number (helps when interacting with GUI)
                 all_slice_locations = series_rows['Slice Location'].values
                 all_instance_numbers = series_rows['Instance Number'].values
 
                 try:
                     all_slice_locations = np.array([float(loc) for loc in all_slice_locations])
                 except ValueError:
-                    all_slice_locations = None
+                    all_slice_locations = np.array([0] * len(all_img_positions))
 
                 try:
                     all_instance_numbers = np.array([float(loc) for loc in all_instance_numbers])
                 except ValueError:
-                    all_instance_numbers = None
+                    all_instance_numbers = np.array([0] * len(all_img_positions))
 
-                if all_slice_locations is None or all_instance_numbers is None:
+                if all_slice_locations is None and all_instance_numbers is None:
                     if self.show_warnings:
-                        self.my_logger.warning(f"Could not sort series {series} due to invalid metadata. Skipping...")
+                        self.my_logger.warning(f"Could not sort series {series} due to missing slice location and instance number fields. Skipping...")
                     continue
 
                 unsorted = [(pos, slice_loc, inst_num) for pos, slice_loc, inst_num in zip(all_img_positions, all_slice_locations, all_instance_numbers)]
