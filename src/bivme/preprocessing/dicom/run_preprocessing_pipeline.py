@@ -15,7 +15,7 @@ from bivme.preprocessing.dicom.select_views import select_views
 from bivme.preprocessing.dicom.segment_views import segment_views
 from bivme.preprocessing.dicom.correct_phase_mismatch import correct_phase_mismatch
 from bivme.preprocessing.dicom.generate_contours import generate_contours
-from bivme.preprocessing.dicom.export_guidepoints import export_guidepoints
+from bivme.preprocessing.dicom.export_guidepoints import export_guidepoints, apply_guidepoint_postprocessing
 from bivme.plotting.plot_guidepoints import generate_html # for plotting guidepoints
 
 
@@ -102,8 +102,14 @@ def perform_preprocessing(case, config, mylogger):
     export_guidepoints(dst, output, slice_dict, config["contouring"]["smooth_landmarks"])
     mylogger.success(f'Guide points exported successfully.')
 
+    # Step 4.1: Post-process guidepoints (if desired)
+    if config["contouring"]["apply_postprocessing"]:
+        apply_guidepoint_postprocessing(output, case, mylogger)
+        mylogger.success(f'Post-processing of guidepoints was successful.')
+
+    mylogger.info(f'Total time taken for preprocessing: {time.time() - start_time} seconds.')
+
     if config["logging"]["generate_log_file"]:
         mylogger.remove(logger_id)
         # Copy log file to states directory
         shutil.copyfile(f'{output}/log_file_{time_string}.log', os.path.join(states, f'log_file_{time_string}.log'))
-

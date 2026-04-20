@@ -399,7 +399,18 @@ class GPDataSet(object):
             self.contour_type = np.hstack((self.contour_type, contour_type))
             self.weights = np.hstack((self.weights, weights))
         else:
-            print("In add_data_point input vectors should have the same lenght")
+            print("In add_data_point input vectors should have the same length")
+
+    def remove_data_points(self, points_index):
+        """
+        remove contour points from a data set
+        input:
+            points_index: list of indices of the points to be removed
+        """
+        self.points_coordinates = np.delete(self.points_coordinates, points_index, axis=0)
+        self.slice_number = np.delete(self.slice_number, points_index)
+        self.contour_type = np.delete(self.contour_type, points_index)
+        self.weights = np.delete(self.weights, points_index)
 
     def create_valve_phantom_points(self, n, contour_type):
         """This function creates mitral phantom points by fitting a circle to the mitral points
@@ -1367,16 +1378,14 @@ class GPDataSet(object):
 
         """
         header = False
-        if overwrite and os.path.exists(file_name):
+        if overwrite:
             if os.path.exists(file_name):
                 os.remove(file_name)
-                header = True
-        elif not os.path.exists(file_name):
             header = True
 
         out = open(file_name, "a")
         if header:
-            out.write('x\ty\tz\tcontour type\tsliceID\tweight\ttime frame\n')
+            out.write('x\ty\tz\tcontour type\tframeID\tweight\ttime frame\n')
         for i, coord in enumerate(self.points_coordinates):
             out.write('{:.5f}\t{:.5f}\t{:.5f}\t{}\t{}\t{}\t{}\n'.format(coord[0], coord[1], coord[2], str(self.contour_type[i])[12:], self.slice_number[i], self.weights[i], time_frame))
 
