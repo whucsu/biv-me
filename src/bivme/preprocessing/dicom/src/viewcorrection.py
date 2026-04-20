@@ -7,7 +7,8 @@ from PIL import Image, ImageTk
 import pandas as pd
 from idlelib.tooltip import Hovertip
 
-LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
+OLD_LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
+LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'SAX-other', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RV', 'RVOT-oblique', 'Excluded']
 
 class VSGUI:
     def __init__(self, patient, dst, viewSelector, my_logger):

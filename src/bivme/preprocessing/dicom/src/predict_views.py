@@ -163,8 +163,11 @@ def predict_on_images(vs):
         vs.my_logger.error("No series found. This means that after excluding invalid series descriptions and images with less than 10 frames, this case has no eligible cine images. Please check your input directory.")
         sys.exit(0)
 
-    view_label_map = {'2ch': 0, '2ch-RT': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
+    old_view_label_map = {'2ch': 0, '2ch-RT': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
                 'OTHER': 5, 'RVOT': 6, 'RVOT-T': 7, 'SAX': 8, 'SAX-atria': 9}
+    
+    view_label_map = {'2ch': 0, '2ch-RV': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
+            'SAX-other': 5, 'RVOT': 6, 'RVOT-oblique': 7, 'SAX': 8, 'SAX-atria': 9}
     
     test_annotations = os.path.join(vs.dst, 'view-classification', 'test_annotations.csv') # Dummy annotations file
     dir_img_test = os.path.join(vs.dst, 'view-classification', 'unsorted') # Directory of images to predict. Predictions are run on .pngs
@@ -178,7 +181,7 @@ def predict_on_images(vs):
         device = torch.device("cpu")
 
     try:
-        loaded_model_path = glob.glob(os.path.join(vs.model, "ViewSelection") + "/resnet50*.pth")[0]
+        loaded_model_path = glob.glob(os.path.join(vs.model, "ViewSelection") + "/resnet50-v32.pth")[0]
     except IndexError:
         vs.my_logger.error("No image view selection model found. Make sure you followed the installation instructions for installing the deep learning models.")
         sys.exit(0)

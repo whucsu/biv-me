@@ -126,8 +126,10 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
 
         all_series = list(set(np.concatenate([metadata_view_predictions['Series Number'].values,image_view_predictions['Series Number'].values])))
         view_predictions_array = []
-        refinement_map = {'2ch': 'LAX', '2ch-RT': 'LAX', '3ch': 'LAX', '4ch': 'LAX', 'LVOT': 'LAX', 'OTHER': 'SAX', 'RVOT': 'LAX', 'RVOT-T': 'Other', 'SAX': 'SAX', 'SAX-atria': 'SAX'}   # Map refined views to view types (SAX, LAX, Outflow)
-                                                                                                                                                                                               
+
+        old_refinement_map = {'2ch': 'LAX', '2ch-RT': 'LAX', '3ch': 'LAX', '4ch': 'LAX', 'LVOT': 'LAX', 'OTHER': 'SAX', 'RVOT': 'LAX', 'RVOT-T': 'Other', 'SAX': 'SAX', 'SAX-atria': 'SAX'}   
+        refinement_map = {'2ch': 'LAX', '2ch-RV': 'LAX', '3ch': 'LAX', '4ch': 'LAX', 'LVOT': 'LAX', 'SAX-other': 'SAX', 'RVOT': 'LAX', 'RVOT-oblique': 'Other', 'SAX': 'SAX', 'SAX-atria': 'SAX'}   # Map refined views to view types (SAX, LAX, Outflow)        
+
         # Loop over all series and get the predictions from both metadata and image-based models                                                                                               
         for series in all_series:
             metadata_row = metadata_view_predictions[metadata_view_predictions['Series Number'] == series]

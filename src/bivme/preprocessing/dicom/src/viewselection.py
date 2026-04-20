@@ -1,11 +1,14 @@
 import os
-import os
 import shutil
 import pydicom
 import numpy as np
 import pandas as pd
 import PIL.Image as Image
-from pathlib import Path
+import cv2
+import nibabel as nib
+
+OLD_VIEW_NAMES = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
+VIEW_NAMES = ['SAX-atria', 'SAX', 'SAX-other', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RV', 'RVOT-oblique', 'Excluded']
 
 class ViewSelector:
     def __init__(self, src, dst, model, type, csv_path, show_warnings, my_logger):
@@ -47,18 +50,48 @@ class ViewSelector:
 
         for i, row in self.df.iterrows():
             img = row['Img']
+            pixel_spacing = row['Pixel Spacing']
             for frame in range(img.shape[0]):
                 img_data = img[frame, :, :]
 
-                # Transpose
-                img_data = np.transpose(img_data)
-                
-                # Cast to uint8
-                # Remap to 0-255
-                img_data = img_data - np.min(img_data)
-                img_data = img_data / np.max(img_data) * 255
-                img_data = img_data.astype(np.uint8)
+                img_size = img_data.shape
+                # Minimum dimension should be 256
+                min_dim = min(img_size)
+                if min_dim != 256:
+                    ratio = 256 / min_dim
+                    new_size = (int(img_size[1] * ratio), int(img_size[0] * ratio))
+                    min_dim = min(new_size)
+                    if min_dim != 256:
+                        new_size = (max(new_size[0], 256), max(new_size[1], 256)) # prevent rounding errors
 
+                img_data = cv2.resize(img_data, new_size, interpolation=cv2.INTER_CUBIC)
+
+                # Crop to central square
+                original_shape = img_data.shape
+
+                if original_shape[0] != original_shape[1]:
+                    # Crop to square
+                    min_dim = min(original_shape[0], original_shape[1])
+                    start_x = (original_shape[0] - min_dim) // 2
+                    start_y = (original_shape[1] - min_dim) // 2
+
+                    img_data = img_data[start_x:start_x+min_dim, start_y:start_y+min_dim]
+                    original_shape = img_data.shape
+
+                # Apply clahe to img_data
+                min_value = min(0, np.min(img_data))
+                img_data += abs(min_value) # Shift to make all values positive because CLAHE requires uint type (0-)
+                img_data = img_data.astype(np.uint16)
+
+                clahe = cv2.createCLAHE(tileGridSize=(1,1))
+                img_data_clahe = clahe.apply(img_data)
+                img_data = img_data_clahe
+
+                # 0-1 normalization
+                img_data = (img_data - np.min(img_data)) / (np.max(img_data) - np.min(img_data))
+                img_data = (img_data * 255).astype(np.uint8)
+
+                # Stack to 3 channels
                 img_data = np.stack((img_data,)*3, axis=-1)
 
                 # Save as png
@@ -96,6 +129,10 @@ class ViewSelector:
         for i, row in view_predictions.iterrows():
             series_number = row['Series Number']
             view = row['Predicted View']
+
+            # Compatibility with older versions of view classification
+            if view in OLD_VIEW_NAMES and view not in VIEW_NAMES:
+                view = VIEW_NAMES[OLD_VIEW_NAMES.index(view)] # Map old view names to new ones
 
             os.makedirs(os.path.join(dir_sorted, view), exist_ok=True)
             
@@ -141,6 +178,7 @@ class ViewSelector:
         except ValueError:
             trigger_time = ds.get('TriggerTime', 'NA')
 
+        encoding_direction = ds.get("InPlanePhaseEncodingDirection", 'NA')
         image_dimension = [ds.get('Rows', 'NA'), ds.get('Columns', 'NA')]
         slice_thickness = ds.get('SliceThickness', 'NA')
         slice_location = ds.get('SliceLocation', 'NA')
@@ -148,13 +186,13 @@ class ViewSelector:
 
         # store image data
         try:
-            array = ds.pixel_array
+            array = ds.pixel_array.astype(np.float32)
         except:
             if self.show_warnings:
                 self.my_logger.warning(f"Could not load image data for {dicom_loc}. Might not contain an image.")
             array = None
 
-        return patient_id, dicom_loc, modality, instance_number, series_instance_uid, series_number , tuple(image_position_patient), image_orientation_patient, pixel_spacing, echo_time, repetition_time, trigger_time, image_dimension, slice_thickness, array, slice_location, series_description
+        return patient_id, dicom_loc, modality, instance_number, series_instance_uid, series_number , tuple(image_position_patient), image_orientation_patient, pixel_spacing, echo_time, repetition_time, trigger_time, encoding_direction, image_dimension, slice_thickness, array, slice_location, series_description
     
     def store_dicom_info(self):
         unsorted_list = []
@@ -184,6 +222,7 @@ class ViewSelector:
                                                 'Echo Time',
                                                 'Repetition Time',
                                                 'Trigger Time',
+                                                'Encoding Direction',
                                                 'Image Dimension',
                                                 'Slice Thickness',
                                                 'Img',
@@ -283,6 +322,7 @@ class ViewSelector:
                     image_orientation_patient = series_rows_split['Image Orientation Patient'].values[0]
                     pixel_spacing = series_rows_split['Pixel Spacing'].values[0]
                     slice_location = series_rows_split['Slice Location'].values[0]
+                    encoding_direction = series_rows_split['Encoding Direction'].values[0]
 
                     if type(pixel_spacing) is str or type(image_position_patient) is str or type(image_orientation_patient) is str:
                         if self.show_warnings:
@@ -291,7 +331,7 @@ class ViewSelector:
 
                     # Add to output
                     output.append([patient_id, filename, modality, series_instance_uid, series_num, image_position_patient, image_orientation_patient, pixel_spacing, 
-                                   slice_location, img, num_phases, series_description])
+                                   slice_location, encoding_direction, img, num_phases, series_description])
                         
                 # Update max series number
                 max_series_num += num_merged_series
@@ -316,6 +356,7 @@ class ViewSelector:
                 image_orientation_patient = series_rows['Image Orientation Patient'].values[0]
                 pixel_spacing = series_rows['Pixel Spacing'].values[0]
                 slice_location = series_rows['Slice Location'].values[0]
+                encoding_direction = series_rows['Encoding Direction'].values[0]
 
                 if type(pixel_spacing) is str or type(image_position_patient) is str or type(image_orientation_patient) is str:
                     if self.show_warnings:
@@ -324,7 +365,7 @@ class ViewSelector:
 
                 # Add to output
                 output.append([patient_id, filename, modality, series_instance_uid, series, image_position_patient, image_orientation_patient, pixel_spacing, 
-                               slice_location, img, num_phases, series_description])
+                               slice_location, encoding_direction, img, num_phases, series_description])
 
 
         # generated pandas dataframe to store information from headers
@@ -337,6 +378,7 @@ class ViewSelector:
                                             'Image Orientation Patient',
                                             'Pixel Spacing', 
                                             'Slice Location',
+                                            'Encoding Direction',
                                             'Img',
                                             'Frames Per Slice',
                                             'Series Description'])
