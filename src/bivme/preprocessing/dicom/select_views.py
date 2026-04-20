@@ -89,8 +89,8 @@ def handle_duplicates(view_predictions, viewSelector, my_logger):
 
     return view_predictions, excluded_df
 
-def correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger):
-    gui = VSGUI(patient, dst, viewSelector, my_logger)
+def correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger):
+    gui = VSGUI(patient, dst, viewSelector, show_videos, my_logger)
     gui.correct_views_gui()
 
     # Load the corrected predictions
@@ -103,7 +103,12 @@ def correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger):
 
     return view_predictions, viewSelector
 
-def select_views(patient, src, dst, model, states, option, correct_mode, my_logger):
+def select_views(patient, src, dst, model, states, config, my_logger):
+    # Unpack config
+    option = config["view-selection"]["option"] # 'default', 'metadata-only', 'image-only', 'load'
+    correct_mode = config["view-selection"]["correct_mode"] # 'manual', 'adaptive', 'automatic'
+    show_videos = config["view-selection"]["show_videos"] # true or false
+
     if option == 'default':
         # Metadata-based model
         metadata_csv_path = os.path.join(dst, 'view-classification', 'metadata_view_predictions.csv')
@@ -217,7 +222,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
         if correct_mode == 'manual':
             my_logger.info('Manual corrections mode enabled. Launching view correction GUI...')
             # Run the view correction GUI
-            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
         elif correct_mode == 'adaptive':
             my_logger.info('Adaptive corrections mode enabled. Checking for missing/bad predictions...')
@@ -237,7 +242,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
             if len(views_missing) > 0:
                 my_logger.warning(f'Views {views_missing} are missing from the predictions.  Launching view correction GUI...')
                 # Run the view correction GUI
-                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
             else:
                 # Check for any predictions with low confidence 
@@ -245,7 +250,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
                 if len(low_confidence) > 0:
                     my_logger.warning(f'Found predictions with low confidence.  Launching view correction GUI...')
                     # Run the view correction GUI
-                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
                 else:
                     my_logger.success('No missing views or low confidence predictions found. No corrections needed (hopefully).')
 
@@ -320,7 +325,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
         if correct_mode == 'manual':
             my_logger.info('Manual corrections mode enabled. Launching view correction GUI...')
             # Run the view correction GUI
-            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
         elif correct_mode == 'adaptive':
             my_logger.info('Adaptive corrections mode enabled. Checking for missing/bad predictions...')
@@ -340,7 +345,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
             if len(views_missing) > 0:
                 my_logger.warning(f'Views {views_missing} are missing from the predictions.  Launching view correction GUI...')
                 # Run the view correction GUI
-                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
             else:
                 # Check for any predictions with low confidence 
@@ -348,7 +353,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
                 if len(low_confidence) > 0:
                     my_logger.warning(f'Found predictions with low confidence.  Launching view correction GUI...')
                     # Run the view correction GUI
-                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
                 else:
                     my_logger.success('No missing views or low confidence predictions found. No corrections needed (hopefully).')
 
@@ -396,7 +401,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
         if correct_mode == 'manual':
             my_logger.info('Manual corrections mode enabled. Launching view correction GUI...')
             # Run the view correction GUI
-            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+            view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
         elif correct_mode == 'adaptive':
             my_logger.info('Adaptive corrections mode enabled. Checking for missing/bad predictions...')
@@ -416,7 +421,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
             if len(views_missing) > 0:
                 my_logger.warning(f'Views {views_missing} are missing from the predictions.  Launching view correction GUI...')
                 # Run the view correction GUI
-                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
 
             else:
                 # Check for any predictions with low confidence 
@@ -424,7 +429,7 @@ def select_views(patient, src, dst, model, states, option, correct_mode, my_logg
                 if len(low_confidence) > 0:
                     my_logger.warning(f'Found predictions with low confidence.  Launching view correction GUI...')
                     # Run the view correction GUI
-                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, my_logger)
+                    view_predictions, viewSelector = correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger)
                 else:
                     my_logger.success('No missing views or low confidence predictions found. No corrections needed (hopefully).')
 
