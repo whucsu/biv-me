@@ -44,8 +44,13 @@ def write_nifti(slice_id, pixel_array, pixel_spacing, input_folder, view):
             new_img = np.zeros(new_shape, dtype=img.dtype)
         else:
             ratio = 1
+
         for frame in range(img.shape[2]):
             new_img[:, :, frame] = cv2.resize(img[:, :, frame], (new_img.shape[1], new_img.shape[0]), interpolation=cv2.INTER_CUBIC)
+
+    else:
+        ratio = 1 # The 'ratio' is the new pixel spacing for the resized images. Usually 1, unless resized images are less than 256x256, in which case they smaller than 1
+        new_img = img
 
     rescale_factor = 1/(current_spacing[0] * ratio)
 

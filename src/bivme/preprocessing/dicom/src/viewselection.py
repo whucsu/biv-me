@@ -64,6 +64,9 @@ class ViewSelector:
                     if min_dim != 256:
                         new_size = (max(new_size[0], 256), max(new_size[1], 256)) # prevent rounding errors
 
+                else:
+                    new_size = img_size
+
                 img_data = cv2.resize(img_data, new_size, interpolation=cv2.INTER_CUBIC)
 
                 # Crop to central square
