@@ -102,6 +102,11 @@ def run_fitting(case, config, mylogger):
             mylogger.remove()
 
         mylogger.info(f"Processing {os.path.basename(case)}")
+
+        # Remove existing models if overwrite is true
+        if os.path.exists(os.path.join(config["output_fitting"]["output_directory"], case)) and config["output_fitting"]["overwrite"]: 
+            shutil.rmtree(os.path.join(config["output_fitting"]["output_directory"], case), ignore_errors=True)
+
         if config["logging"]["generate_log_file"]:
             log_level = "DEBUG"
             log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
@@ -237,10 +242,6 @@ if __name__ == "__main__":
         # Edit gp_directory to point to the output of the preprocessing
         gp_dir = os.path.join(config["output_pp"]["output_directory"], config["input_pp"]["batch_ID"])
         config["input_fitting"]["gp_directory"] = gp_dir
-
-        # save a copy of the config file to the output folder
-        if config["output_pp"]["overwrite"] and os.path.exists(gp_dir):
-            shutil.rmtree(gp_dir)
             
         os.makedirs(gp_dir, exist_ok=True)
         shutil.copy(args.config_file, gp_dir)
