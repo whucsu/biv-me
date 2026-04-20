@@ -78,13 +78,21 @@ def perform_preprocessing(case, config, mylogger):
     mylogger.success(f'Pre-preprocessing complete. Cines extracted to {src}.')
 
     ## Step 1: View selection
-    slice_info_df, num_phases = select_views(case, src, dst, MODEL_DIR, states, config["view-selection"]["option"], 
-                                                            config["view-selection"]["correct_mode"], mylogger)
+    slice_info_df, num_phases = select_views(case, src, dst, MODEL_DIR, states, config, mylogger)
 
     mylogger.success(f'View selection complete.')
     mylogger.info(f'Number of phases: {num_phases}')
 
-    ## Step 2: Segmentation
+    # Check if there's any 4ch selected
+    if slice_info_df.empty:
+        mylogger.error(f'No views were selected for case {case}. Please check the view selection output and adjust the view selection parameters in the config file if necessary.')
+        return
+    else:
+        four_ch_views = slice_info_df[slice_info_df['View'] == '4ch']
+        if four_ch_views.empty:
+            mylogger.warning(f'No 4ch views were selected for case {case}. Segmentations and guidepoints will be created, but no meshes will be generated due to the lack of tricuspid valve points...')
+
+    # # Step 2: Segmentation
     seg_start_time = time.time()
     mylogger.info(f'Starting segmentation...')
     segment_views(dst, MODEL_DIR, slice_info_df, mylogger) # TODO: Find a way to suppress nnUnet output

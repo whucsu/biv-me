@@ -23,8 +23,16 @@ def validate_config_preprocessing(config, mylogger):
         mylogger.error(f'Invalid correct mode: {config["view-selection"]["correct_mode"]}. Must be "automatic", "adaptive", or "manual".')
         sys.exit(0)
 
+    if not (config["view-selection"]["show_videos"] == True or config["view-selection"]["show_videos"] == False):
+        mylogger.error(f'Invalid show_videos option: {config["view-selection"]["show_videos"]}. Must be true or false.')
+        sys.exit(0)
+
     if not (config["contouring"]["smooth_landmarks"] == True or config["contouring"]["smooth_landmarks"] == False):
         mylogger.error(f'Invalid smooth_landmarks option: {config["contouring"]["smooth_landmarks"]}. Must be true or false.')
+        sys.exit(0)
+
+    if not (config["contouring"]["apply_postprocessing"] == True or config["contouring"]["apply_postprocessing"] == False):
+        mylogger.error(f'Invalid apply_postprocessing option: {config["contouring"]["apply_postprocessing"]}. Must be true or false.')
         sys.exit(0)
 
     if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
@@ -167,8 +175,8 @@ if __name__ == "__main__":
                         "processing": str(),
                         "states": str()
                         },
-            "view-selection": {"option": str(), "correct_mode": str()},
-            "contouring": {"smooth_landmarks": bool()},
+            "view-selection": {"option": str(), "correct_mode": str(), "show_videos": bool()},
+            "contouring": {"smooth_landmarks": bool(), "apply_postprocessing": bool()},
             "output_pp": {"overwrite": bool(), "output_directory": str()},
 
             "input_fitting": {"gp_directory": str(),
