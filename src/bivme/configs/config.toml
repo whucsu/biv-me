@@ -102,6 +102,12 @@ correct_mode = "manual"
 # * "automatic": will not launch the GUI and will use the predictions as they are with no interruption
 # Default: "manual"
 
+show_videos = true
+# Define whether you would like videos of cine series to be shown within the view correction GUI (if launched). Disable this (set to false) if there is too much lag in displaying videos, which can be an issue for some devices.
+# * true    : will display videos of cine series in view correction GUI.
+# * false   : will only display still image of first frame of each series in view correction GUI.
+# Default: true
+
 [contouring]
 smooth_landmarks = true
 # Define whether you would like to apply temporal smoothing to landmarks (mitral, tricuspid, pulmonary, and aortic valves, RV insertion points, apex points)
@@ -109,6 +115,16 @@ smooth_landmarks = true
 # Allowed values:
 # * true    : Apply smoothing
 # * false    : Do not apply smoothing
+# Default: true
+
+apply_postprocessing = true
+# Define whether you would like to postprocess contours after segmentation and contour extraction. Note that this does not refer to segmentation QC (e.g. hole filling).
+# Postprocessing operations include removing contours outside of the estimated cardiac ROI, removing misaligned SAX contours, and removing landmarks that are incorrectly oriented with respect to the long axis. 
+# This helps to protect against segmental faults, breath hold artifiacts, or poor scanning protocol
+# See src/bivme/preprocessing/dicom/src/guidepointprocessing.py for more details 
+# Allowed values:
+# * true    : Apply postprocessing
+# * false   : Do not apply postprocessing
 # Default: true
 
 [output_pp]
