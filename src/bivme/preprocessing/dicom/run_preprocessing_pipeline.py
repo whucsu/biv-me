@@ -25,6 +25,7 @@ def perform_preprocessing(case, config, mylogger):
 
     # Unpack config parameters
     # Input
+    start_time = time.time()
     src = os.path.join(config["input_pp"]["source"], case)
 
     # Processing
@@ -44,8 +45,6 @@ def perform_preprocessing(case, config, mylogger):
     if os.path.exists(output):
         shutil.rmtree(output) # remove existing directory
     os.makedirs(output, exist_ok=True) # create new directory
-
-    plotting = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"]) # save the plotted htmls in processed directory
 
     # Logging
     if not config["logging"]["show_detailed_logging"]:

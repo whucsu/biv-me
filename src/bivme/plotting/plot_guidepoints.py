@@ -9,6 +9,7 @@ import nibabel as nib
 import re
 import fnmatch
 import pyvista as pv
+import cv2
 
 from bivme.fitting.BiventricularModel import BiventricularModel
 from bivme.fitting.GPDataSet import GPDataSet
@@ -77,6 +78,10 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
     image_plots = []
 
     for root, dirs, files in os.walk(image_path):
+        # Only load images from the resized folder
+        if 'resized-cropped-normalised' in root:
+            continue
+
         for file in files:
             if file.endswith('.nii.gz'):
                 nifti_file = os.path.join(root, file)
@@ -124,14 +129,14 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
                             pixel_vector[i * frame_data.shape[1] + j] = np.array([j+shift[0]/ps[0], i+shift[1]/ps[1], 0, 1.0]) # Apply shift to x,y,z,1.0. Shifts contain scaling factor so must be divided by pixel spacing first
 
                     coords_vector = np.dot(M, pixel_vector.T).T
-                    coords3d[:, :, 0] = coords_vector[:, 0].reshape((frame_data.shape[0], frame_data.shape[1]), order='F')
-                    coords3d[:, :, 1] = coords_vector[:, 1].reshape((frame_data.shape[0], frame_data.shape[1]), order='F')
-                    coords3d[:, :, 2] = coords_vector[:, 2].reshape((frame_data.shape[0], frame_data.shape[1]), order='F')
+                    coords3d[:, :, 0] = coords_vector[:, 0].reshape((frame_data.shape[0], frame_data.shape[1]), order='C')
+                    coords3d[:, :, 1] = coords_vector[:, 1].reshape((frame_data.shape[0], frame_data.shape[1]), order='C')
+                    coords3d[:, :, 2] = coords_vector[:, 2].reshape((frame_data.shape[0], frame_data.shape[1]), order='C')
 
                     # Create meshgrid
-                    gridX = np.reshape(coords3d[:, :, 0], (frame_data.shape[0], frame_data.shape[1]), order='F')
-                    gridY = np.reshape(coords3d[:, :, 1], (frame_data.shape[0], frame_data.shape[1]), order='F')
-                    gridZ = np.reshape(coords3d[:, :, 2], (frame_data.shape[0], frame_data.shape[1]), order='F')
+                    gridX = np.reshape(coords3d[:, :, 0], (frame_data.shape[0], frame_data.shape[1]), order='C')
+                    gridY = np.reshape(coords3d[:, :, 1], (frame_data.shape[0], frame_data.shape[1]), order='C')
+                    gridZ = np.reshape(coords3d[:, :, 2], (frame_data.shape[0], frame_data.shape[1]), order='C')
 
                     gridX = gridX.astype(np.float16)
                     gridY = gridY.astype(np.float16)
@@ -144,6 +149,18 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
                     gridY = image_grids[slice_number][1]
                     gridZ = image_grids[slice_number][2]
 
+
+                # Apply CLAHE
+                clahe = cv2.createCLAHE(tileGridSize=(1, 1))
+
+                # Shift the pixel values to be all positive before applying CLAHE
+                min_value = min(0, np.min(frame_data))
+                frame_data += abs(min_value) 
+
+                frame_data = clahe.apply(frame_data.astype(np.uint16))
+
+                # Convert frame data to uint8 to save memory
+                frame_data = (frame_data - np.min(frame_data)) / (np.max(frame_data) - np.min(frame_data)) * 255
                 frame_data = frame_data.astype(np.uint8)
 
                 image_plots.append(go.Surface(x=gridX, y=gridY, z=gridZ,
@@ -165,13 +182,17 @@ def plot_images(image_path, data_set, image_grids, output_path = None, shifts = 
                     grid = pv.StructuredGrid(gridX, gridY, gridZ)
                     grid.point_data.set_scalars(frame_data.flatten(order='F'))
 
+                    # Create folder for the view if it doesn't exist
+                    view_folder = os.path.join(output_path, slice_type)
+                    os.makedirs(view_folder, exist_ok=True)
+
                     # Save the grid as a VTK file
                     save_name = f"{slice_type}_{slice_number}_{frame:03d}.vtk"
-                    grid.save(os.path.join(output_path, save_name))
+                    grid.save(os.path.join(view_folder, save_name))
 
     return image_plots, image_grids
 
-def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", frames_to_fit: list[int]=[], my_logger: logger = logger, model_path = None, image_path = None) -> None:
+def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix: str ="", si_suffix: str ="", frames_to_fit: list[int]=[], my_logger: logger = logger, model_path = None, image_path = None, vtk_export_path = None) -> None:
 
     si_rule = re.compile(fnmatch.translate(f"*SliceInfoFile{si_suffix}*.txt"), re.IGNORECASE)
     filename_info = [Path(gp_dir) / Path(name) for name in os.listdir(Path(gp_dir)) if si_rule.match(name)]
@@ -249,7 +270,7 @@ def generate_html(case: str, gp_dir: str, out_dir: str ="./results/", gp_suffix:
                         image_path,
                         data_set,
                         image_grids,
-                        output_path = None,
+                        output_path = vtk_export_path,
                         shifts=None,  # No shifts applied
                         frame=num
                     )
@@ -331,7 +352,7 @@ if __name__ == "__main__":
                     model_dir = None
 
                 if args.image_directory is not None:
-                    image_dir = Path(args.image_directory) / case / "images"
+                    image_dir = Path(args.image_directory) / case / "images" / "resized"
                 else:
                     image_dir = None
 

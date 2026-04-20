@@ -112,6 +112,7 @@ def run_fitting(case, config, mylogger):
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
         gp_suffix = config["input_fitting"]["gp_suffix"]
         si_suffix = config["input_fitting"]["si_suffix"]
+
         start_time = time.time()
         residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=gp_suffix, si_suffix=si_suffix,
                         workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
@@ -122,15 +123,21 @@ def run_fitting(case, config, mylogger):
             start_time = time.time()
             gp_dir = os.path.join(config["output_fitting"]["output_directory"], case, "gpfiles") # directory where the guidepoints are saved after fitting
             model_dir = os.path.join(config["output_fitting"]["output_directory"], case) # directory where the fitted models are saved
-            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot
+            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot\
 
             if config["plotting"]["include_images"]:
                 image_path = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case, "images")
             else:
                 image_path = None
 
+            if config["plotting"]["export_images"]:
+                vtk_export_path = os.path.join(config["output_fitting"]["output_directory"], case, "vtk-images")
+                os.makedirs(vtk_export_path, exist_ok=True)
+            else:
+                vtk_export_path = None
+
             generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
-                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path)
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path)
             
             mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
