@@ -1,29 +1,31 @@
 import numpy as np
 import cv2
 
-LABEL_MAP = {"SAX": { "LV_endo": 1,
-                           "LV_myo": 2,
-                           "RV_endo": 3,
-                           "RV_myo": 4},
-              "2ch":  { "LV_endo": 1,
-                        "LV_myo": 2,
-                        "LA_endo": 3},
-              "3ch":  { "LV_endo": 1,
-                        "LV_myo": 2,
-                        "RV_endo": 3,
-                        "LA_endo": 4,
-                        "Aorta": 5,
-                        "RV_myo": 6},
-              "4ch":  { "LV_endo": 1,
-                        "LV_myo": 2,
-                        "RV_endo": 3,
-                        "LA_endo": 4,
-                        "RA_endo": 5,
-                        "RV_myo": 6},
-              "RVOT": { "RV_endo": 1,
-                        "RV_myo": 2,
-                        "PA": 3}
+
+LABEL_MAP = {"SAX":  { "LV_endo": 1,
+                       "LV_myo": 2,
+                       "RV_endo": 3,
+                       "RV_myo": 4},
+             "2ch":  { "LV_endo": 1,
+                       "LV_myo": 2,
+                       "LA_endo": 3},
+             "3ch":  { "LV_endo": 1,
+                       "LV_myo": 2,
+                       "RV_endo": 3,
+                       "LA_endo": 4,
+                       "Aorta": 5,
+                       "RV_myo": 6},
+             "4ch":  { "LV_endo": 1,
+                       "LV_myo": 2,
+                       "RV_endo": 3,
+                       "LA_endo": 4,
+                       "RA_endo": 5,
+                       "RV_myo": 6},
+             "RVOT": { "RV_endo": 1,
+                       "RV_myo": 2,
+                       "PA": 3}
             }
+
 
 def get_intersections(point_list1, point_list2, distance_cutoff=4.5):
 
@@ -43,6 +45,7 @@ def get_intersections(point_list1, point_list2, distance_cutoff=4.5):
     pairs = pairs[np.where(dist < distance_cutoff)[0].tolist()]
 
     return pairs
+
 
 def get_valve_points_from_intersections(segmentation, endolabel, superlabel, distance_cutoff=2):
     ## TODO: Pass in contours not segmentation
@@ -97,11 +100,13 @@ def get_valve_points_from_intersections(segmentation, endolabel, superlabel, dis
 
     return valvepts
 
+
 def estimate_lva(epipts, mv1, mv2):
     mv_centroid = [np.mean([mv1[0], mv2[0]]), np.mean([mv1[1], mv2[1]])]
     distances = [np.sqrt((p[0] - mv_centroid[0])**2 + (p[1] - mv_centroid[1])**2) for p in epipts]
     lvepiapex = epipts[np.argmax(distances)]
     return lvepiapex
+
 
 def find_contours(seg: np.ndarray, spec: str = "all") -> list[np.ndarray]:
     """Find the contours within the segmentation.
@@ -126,6 +131,7 @@ def find_contours(seg: np.ndarray, spec: str = "all") -> list[np.ndarray]:
     )
 
     return contours
+
 
 def find_coordinates_of_holes(seg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Find the coordinates of the holes in a segmentation.
@@ -170,6 +176,7 @@ def find_coordinates_of_holes(seg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     )
 
     return coordinates_holes
+
 
 def fill_holes_within_structure(seg: np.ndarray, label: int) -> np.ndarray:
     """Fill the holes within a structure.
@@ -471,6 +478,7 @@ def contour_SAX(segmentation):
                 
     return [LV_endo_pts, LV_epi_pts, RV_septal_pts, RV_fw_pts, RV_epi_pts]
 
+
 def contour_RVOT(segmentation):
     RV_endo = (segmentation == 1).astype(np.uint8)
     RV_myo = (segmentation == 2).astype(np.uint8)
@@ -629,6 +637,7 @@ def contour_2ch(segmentation):
     la_pts = cleaned_la_pts if 'cleaned_la_pts' in locals() else la_pts
             
     return [LV_endo_pts, LV_epi_pts, la_pts]
+
 
 def contour_3ch(segmentation):
     # extract points
@@ -806,6 +815,7 @@ def contour_3ch(segmentation):
                                 dtype=np.int64)
             
     return [LV_endo_pts, LV_epi_pts, RV_septal_pts, RV_fw_pts, la_pts, aorta_pts, RV_epi_pts]
+
 
 def contour_4ch(segmentation):
     # extract points

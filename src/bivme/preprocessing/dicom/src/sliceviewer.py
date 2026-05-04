@@ -6,6 +6,7 @@ import bivme.preprocessing.dicom.src.contouring as contouring
 import bivme.preprocessing.dicom.src.guidepointprocessing as guidepointprocessing
 import bivme.preprocessing.dicom.src.utils as utils
 
+
 class SliceViewer:
     def __init__(self, processed_folder, slice_info_df, view, sliceID, es_phase, num_phases, full_cycle=True, my_logger=None):
         
@@ -208,7 +209,6 @@ class SliceViewer:
         self.imgPos = self.slice['ImagePositionPatient'].values[0]
         self.imgOrient = self.slice['ImageOrientationPatient'].values[0]
         self.ps = self.slice['Pixel Spacing'].values[0]
-
 
     def smooth_landmarks(self, landmarks):
         # Smooth landmarks by applying an low pass filter
@@ -549,7 +549,6 @@ class SliceViewer:
                             points = points[0]
 
                         pts = [guidepointprocessing.inverse_coordinate_transformation(points, self.imgPos, self.imgOrient, self.ps)]
-
 
                     else:
                         pts = [guidepointprocessing.inverse_coordinate_transformation(point, self.imgPos, self.imgOrient, self.ps)

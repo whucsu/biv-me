@@ -7,6 +7,7 @@ from PIL import Image, ImageTk
 import pandas as pd
 from idlelib.tooltip import Hovertip
 
+
 OLD_LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
 LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'SAX-other', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RV', 'RVOT-oblique', 'Excluded']
 
@@ -195,7 +196,6 @@ class VSGUI:
                 loaded_images.append(image_tk)
 
             self.img_dict[series] = loaded_images
-
 
         self.list_of_images = []
         self.list_of_dropdowns = []

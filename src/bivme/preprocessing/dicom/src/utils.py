@@ -4,6 +4,7 @@ import nibabel as nib
 import cv2
 import scipy.ndimage as ndimage
 
+
 def write_sliceinfofile(dst, slice_info_df):
     # write to slice info file
     with open(os.path.join(dst, 'SliceInfoFile.txt'), 'w') as f:
@@ -121,6 +122,7 @@ def write_nifti(slice_id, pixel_array, pixel_spacing, input_folder, view):
 
     return rescale_factor
 
+
 def resample_img(dst, view, series, num_phases, my_logger):
     # Load 3D nifti
     img = nib.load(os.path.join(dst, 'images', view, 'resized', '{}_3d_{}_0000.nii.gz'.format(view, series)))
@@ -136,6 +138,7 @@ def resample_img(dst, view, series, num_phases, my_logger):
     affine = img.affine
     new_nii = nib.Nifti1Image(new_img_array, affine)
     nib.save(new_nii, os.path.join(dst, 'images', view, 'resized', '{}_3d_{}_0000.nii.gz'.format(view, series)))
+
 
 def resample_seg(dst, view, series, num_phases, my_logger):
     # Load 3D nifti
@@ -155,6 +158,7 @@ def resample_seg(dst, view, series, num_phases, my_logger):
 
     nib.save(new_nii, os.path.join(dst, 'segmentations', view, 'uncropped', '{}_3d_{}.nii.gz'.format(view, series)))
 
+
 def clean_text(string):
 
     # clean and standardize text descriptions, which makes searching files easier
@@ -164,6 +168,7 @@ def clean_text(string):
         string = string.replace(symbol, "")  # replace all bad symbols
 
     return string.lower()
+
 
 def from_2d_to_3d(
     p2, image_orientation, image_position, pixel_spacing
@@ -215,6 +220,7 @@ def from_2d_to_3d(
 
     return p3[0, 0], p3[0, 1], p3[0, 2]
 
+
 def plane_intersect(a, b):
     """
     a, b   4-tuples/lists
@@ -238,12 +244,14 @@ def plane_intersect(a, b):
 
     return p_inter[0], (p_inter + aXb_vec)[0]
 
+
 def fft(curve, harmonic_divisor=4):
     fft_volume = np.fft.rfft(curve)
     fft_volume[int(np.floor(len(curve)/harmonic_divisor)):] = 0
     curve_filtered = np.fft.irfft(fft_volume)
 
     return curve_filtered
+
 
 def apply_fft(curve, harmonic_divisor=4):
     if len(curve) % 2 != 0:

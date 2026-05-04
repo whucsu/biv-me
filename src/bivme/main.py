@@ -11,6 +11,7 @@ from bivme.preprocessing.dicom.run_preprocessing_pipeline import perform_preproc
 from bivme.fitting.perform_fit import perform_fitting
 from bivme.plotting.plot_guidepoints import generate_html
 
+
 def validate_config_preprocessing(config, mylogger):
     assert os.path.exists(config["input_pp"]["source"]), \
         f'DICOM folder does not exist! Make sure to add the correct directory under "source" in the config file.'
@@ -38,6 +39,7 @@ def validate_config_preprocessing(config, mylogger):
     if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
         mylogger.error(f'Invalid overwrite option: {config["output_pp"]["overwrite"]}. Must be true or false.')
         sys.exit(0)
+
 
 def validate_config_fitting(config, mylogger):
     assert Path(config["input_fitting"]["gp_directory"]).exists(), \
@@ -72,6 +74,7 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument workers must be a positive integer. {config["multiprocessing"]["workers"]} given.')
         sys.exit(0)
 
+
 def run_preprocessing(case, config, mylogger):
     try:
         perform_preprocessing(case, config, mylogger)
@@ -95,6 +98,7 @@ def run_preprocessing(case, config, mylogger):
     except KeyboardInterrupt:
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
+
 
 def run_fitting(case, config, mylogger):
     try:
@@ -153,6 +157,7 @@ def run_fitting(case, config, mylogger):
     except KeyboardInterrupt:
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
+
 
 if __name__ == "__main__":
     # Parse arguments

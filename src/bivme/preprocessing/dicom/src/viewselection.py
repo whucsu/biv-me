@@ -7,6 +7,7 @@ import PIL.Image as Image
 import cv2
 import nibabel as nib
 
+
 OLD_VIEW_NAMES = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
 VIEW_NAMES = ['SAX-atria', 'SAX', 'SAX-other', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RV', 'RVOT-oblique', 'Excluded']
 
@@ -369,7 +370,6 @@ class ViewSelector:
                 # Add to output
                 output.append([patient_id, filename, modality, series_instance_uid, series, image_position_patient, image_orientation_patient, pixel_spacing, 
                                slice_location, encoding_direction, img, num_phases, series_description])
-
 
         # generated pandas dataframe to store information from headers
         self.df = pd.DataFrame(sorted(output), columns=['Patient ID',

@@ -15,6 +15,7 @@ from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 from bivme.preprocessing.dicom.src.utils import write_nifti
 from bivme.preprocessing.dicom.src.utils import write_sliceinfofile
 
+
 def init_nnUNetv2(model_folder, my_logger):
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -41,6 +42,7 @@ def init_nnUNetv2(model_folder, my_logger):
     )
     return predictor
 
+
 def predict_view(input_folder, output_folder, model, view, dataset, my_logger):
     # Define the trained model to use (Specified by the Task)
     model_folder_name = os.path.join(model,"Segmentation/{}/nnUNetTrainer__nnUNetPlans__3d_fullres/".format(dataset))
@@ -62,6 +64,7 @@ def predict_view(input_folder, output_folder, model, view, dataset, my_logger):
         )
 
         my_logger.info(f'Done with {view}')
+
 
 def reassemble_full_segmentation(input_folder, output_folder, view, slice_info_df, my_logger):
     original_view_input_folder = os.path.join(input_folder, view, 'resized')

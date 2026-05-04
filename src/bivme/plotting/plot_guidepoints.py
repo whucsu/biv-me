@@ -17,7 +17,6 @@ from bivme.fitting.surface_enum import ContourType
 from loguru import logger
 from rich.progress import Progress
 
-
 from bivme import MODEL_RESOURCE_DIR
 
 # This list of contours_to _plot was taken from Liandong Lee

@@ -14,6 +14,7 @@ from bivme.preprocessing.dicom.src.viewselection import ViewSelector
 from bivme.preprocessing.dicom.src.guidepointprocessing import inverse_coordinate_transformation
 from bivme.preprocessing.dicom.src.utils import plane_intersect
 
+
 class CustomImageDataset(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, target_transform=None):
         self.img_labels = pd.read_csv(annotations_file)
@@ -40,6 +41,7 @@ def predict_views(vs):
         predict_on_metadata(vs)
     elif vs.type == 'image':
         predict_on_images(vs)
+
 
 def predict_on_metadata(vs):
     vs.prepare_data_for_prediction()
@@ -156,6 +158,7 @@ def predict_on_metadata(vs):
     output_df = pd.DataFrame(view_predictions, columns=['Series Number', 'View Class'])
     output_df.to_csv(vs.csv_path, mode='w', index=False)
 
+
 def predict_on_images(vs):
     vs.prepare_data_for_prediction()
 
@@ -266,7 +269,6 @@ def predict_on_images(vs):
                                         f'{list(view_label_map.keys())[8]} confidence',
                                         f'{list(view_label_map.keys())[9]} confidence'])
 
-
     # Determine view class from majority vote across all frames
     for series in vs.df['Series Number'].unique():
         series_views = test_pred_df[test_pred_df['image_name'].str.startswith(f'{series}_')]
@@ -301,7 +303,6 @@ def predict_on_images(vs):
                                 f'{list(view_label_map.keys())[7]} confidence': [confidences[7]],
                                 f'{list(view_label_map.keys())[8]} confidence': [confidences[8]],
                                 f'{list(view_label_map.keys())[9]} confidence': [confidences[9]]})
-
         
         output_df = pd.concat([output_df, new_row], ignore_index=True)
     

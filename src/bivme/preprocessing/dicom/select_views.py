@@ -7,7 +7,8 @@ from bivme.preprocessing.dicom.src.viewselection import ViewSelector
 from bivme.preprocessing.dicom.src.predict_views import predict_views
 from bivme.preprocessing.dicom.src.viewcorrection import VSGUI
 
-CONFIDENCE_THRESHOLD = 0.66  # Modify this to change the confidence threshold for view selection. If metadata and image-based predictions disagree, the image-based prediction will be used if its confidence is above this threshold. 
+
+CONFIDENCE_THRESHOLD = 0.66 # Modify this to change the confidence threshold for view selection. If metadata and image-based predictions disagree, the image-based prediction will be used if its confidence is above this threshold. 
                             # Otherwise, the metadata-based prediction will be used.
 
 def handle_duplicates(view_predictions, viewSelector, my_logger):
@@ -89,6 +90,7 @@ def handle_duplicates(view_predictions, viewSelector, my_logger):
 
     return view_predictions, excluded_df
 
+
 def correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos, my_logger):
     gui = VSGUI(patient, dst, viewSelector, show_videos, my_logger)
     gui.correct_views_gui()
@@ -102,6 +104,7 @@ def correct_views(patient, dst, viewSelector, csv_path, states_path, show_videos
     my_logger.success('View correction complete. Predictions saved.')
 
     return view_predictions, viewSelector
+
 
 def select_views(patient, src, dst, model, states, config, my_logger):
     # Unpack config

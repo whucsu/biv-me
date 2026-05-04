@@ -4,6 +4,7 @@ import numpy as np
 from bivme.fitting.surface_enum import *
 from bivme.fitting.GPDataSet import GPDataSet
 
+
 def write_to_gp_file(path, coords, label, slice_id, weight=1.0, phase=1.0):
 
     """ Writes a coordinate/line to the guide point file """
@@ -27,6 +28,7 @@ def write_to_gp_file(path, coords, label, slice_id, weight=1.0, phase=1.0):
         except:
             count += 1
             pass
+
 
 def inverse_coordinate_transformation(coordinate, imagePositionPatient, imageOrientationPatient, ps):
 
@@ -53,7 +55,6 @@ def remove_misaligned_rv_sax_contours(dataset, my_logger, frame):
     point_coords = dataset.points_coordinates
     point_slices = dataset.slice_number
     point_labels = dataset.contour_type
-
 
     rv_fw_idx = np.where(point_labels == ContourType.SAX_RV_FREEWALL)[0]
     rv_s_idx = np.where(point_labels == ContourType.SAX_RV_SEPTUM)[0]
@@ -164,6 +165,7 @@ def remove_misaligned_rv_sax_contours(dataset, my_logger, frame):
 
     return dataset
 
+
 def remove_misaligned_lv_sax_contours(dataset, my_logger, frame):
     point_coords = dataset.points_coordinates
     point_slices = dataset.slice_number
@@ -265,6 +267,7 @@ def remove_misaligned_lv_sax_contours(dataset, my_logger, frame):
 
     return dataset
 
+
 def remove_misaligned_lv_lax_contours(dataset, my_logger, frame):
     point_coords = dataset.points_coordinates
     point_slices = dataset.slice_number
@@ -318,6 +321,7 @@ def remove_misaligned_lv_lax_contours(dataset, my_logger, frame):
     dataset.remove_data_points(idx_to_del)
 
     return dataset
+
 
 def remove_misplaced_contours(dataset, my_logger, frame):
     point_coords = dataset.points_coordinates
