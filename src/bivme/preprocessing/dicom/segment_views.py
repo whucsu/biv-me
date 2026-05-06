@@ -4,13 +4,12 @@ import torch
 import nibabel as nib
 import numpy as np
 
+from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
 # Set nnUNet environment variables so it doesn't scream at you with warnings
 os.environ['nnUNet_raw'] = '.'
 os.environ['nnUNet_preprocessed'] = '.'
 os.environ['nnUNet_results'] = '.'
-
-import nnunetv2 as nnunetv2
-from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
 from bivme.preprocessing.dicom.src.utils import write_nifti
 from bivme.preprocessing.dicom.src.utils import write_sliceinfofile
