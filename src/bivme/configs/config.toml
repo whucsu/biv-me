@@ -16,7 +16,7 @@ fitting = true
 # If only preprocessing is enabled, GPFiles and SliceInfo files will be created for each case within a DICOM directory 
 # Allowed values:
 # * true    : Run this module
-# * false    : Do not run this module
+# * false   : Do not run this module
 # Default: true
 
 [logging]
@@ -76,7 +76,7 @@ batch_ID = "test"
 # Default: "test"
 
 analyst_id = "analyst1"
-# Define the id of the analyst performing the preprocessing. Useful e.g. if view predictions need to be corrected
+# Define the id of the analyst performing the preprocessing. Useful e.g., if view predictions need to be corrected
 # Default: "analyst1"
 
 processing = "../../example/processing"
@@ -114,13 +114,13 @@ smooth_landmarks = true
 # Temporal smoothing of landmarks helps to regularise the resulting fit and avoids sampling errors due to image resolution 
 # Allowed values:
 # * true    : Apply smoothing
-# * false    : Do not apply smoothing
+# * false   : Do not apply smoothing
 # Default: true
 
 apply_postprocessing = true
-# Define whether you would like to postprocess contours after segmentation and contour extraction. Note that this does not refer to segmentation QC (e.g. hole filling).
+# Define whether you would like to postprocess contours after segmentation and contour extraction. Note that this does not refer to segmentation quality-control (e.g., hole filling).
 # Postprocessing operations include removing contours outside of the estimated cardiac ROI, removing misaligned SAX contours, and removing landmarks that are incorrectly oriented with respect to the long axis. 
-# This helps to protect against segmental faults, breath hold artifiacts, or poor scanning protocol
+# This helps to protect against segmental faults, breathing artefacts, or poor scanning protocol.
 # See src/bivme/preprocessing/dicom/src/guidepointprocessing.py for more details 
 # Allowed values:
 # * true    : Apply postprocessing
@@ -171,12 +171,12 @@ si_suffix = ""
 # Default: ""
 
 [breathhold_correction]
-shifting = "derived_from_ed" # derived_from_ed, average_all_frames, none
-# Define the method used for breathhold misregistration correction.
+shifting = "derived_from_ed"
+# Define the method used for breath-hold misregistration correction.
 # Allowed values:
-# * "derived_from_ed"      : The correction is calculated at ED only and propagated to all the frames
-# * "average_all_frames"  : Breathold misregistration is calculated by averaging slice shift over all frame
-# * "none"  : no correction applied
+# * "derived_from_ed"    : The correction is calculated at ED only and propagated to all the frames
+# * "average_all_frames" : Breathold misregistration is calculated by averaging slice shift over all frame
+# * "none"               : no correction applied
 # Default: "derived_from_ed"
 
 ed_frame = 0  # ED frame
@@ -236,10 +236,10 @@ output_meshes = ["LV_ENDOCARDIAL", "RV_ENDOCARDIAL", "EPICARDIAL"]
 # Allowed values:
 # * "LV_ENDOCARDIAL" : LV endocardium
 # * "RV_ENDOCARDIAL" : RV endocardium - RVFW and RVS
-# * "EPICARDIAL" : Epicardium
+# * "EPICARDIAL"     : Epicardium
 
 overwrite = false
-# Define to overwrite the output mesh if it exists
+# Define whether to overwrite the output mesh if it exists
 # Default: false
 
 output_directory = "../output/"
