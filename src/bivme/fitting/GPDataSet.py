@@ -26,7 +26,10 @@ SAMPLED_CONTOUR_TYPES = [
     ContourType.LAX_RV_FREEWALL,
     ContourType.SAX_RV_SEPTUM,
     ContourType.LAX_RV_SEPTUM,
-    ContourType.SAX_RV_OUTLET,
+    ContourType.SAX_RV_OUTLET, # Deprecated in favour of OUTLET_RV_****, but kept here for backward compatibility 
+    ContourType.OUTLET_RV_FREEWALL,
+    ContourType.OUTLET_RV_SEPTUM,
+    ContourType.OUTLET_RV_EPICARDIAL,
     ContourType.EXCLUDED,
     ContourType.SAX_LAA,
     ContourType.SAX_LPV,
@@ -34,6 +37,7 @@ SAMPLED_CONTOUR_TYPES = [
     ContourType.SAX_SVC,
     ContourType.SAX_IVC,
 ]
+
 UNSAMPLED_CONTOUR_TYPES = [
     ContourType.MITRAL_VALVE,
     ContourType.TRICUSPID_VALVE,
@@ -573,6 +577,9 @@ class GPDataSet(object):
                 ContourType.LAX_RV_ENDOCARDIAL,
                 ContourType.SAX_RV_ENDOCARDIAL,
                 ContourType.SAX_RV_OUTLET,
+                ContourType.OUTLET_RV_FREEWALL,
+                ContourType.OUTLET_RV_SEPTUM,
+                ContourType.OUTLET_RV_EPICARDIAL,
                 ContourType.PULMONARY_PHANTOM,
                 ContourType.MITRAL_PHANTOM,
                 ContourType.AORTA_PHANTOM,
@@ -604,6 +611,9 @@ class GPDataSet(object):
                 "rgb(0,0,205)",
                 "rgb(65,105,225)",
                 "rgb(0,206,209)",
+                "rgb(72,209,204)",
+                "rgb(32,178,170)",
+                "rgb(95,158,160)",
                 "rgb(95,158,160)",
                 "rgb(128,0,0)",
                 "rgb(0,255,0)",
@@ -620,9 +630,9 @@ class GPDataSet(object):
                 "rgb(114,97,123)",
                 "rgb(158,0,0)",
                 "rgb(0,79,255)",
-
             ]
         )
+
         # points types
         contour_points = np.array(
             [
@@ -894,7 +904,13 @@ class GPDataSet(object):
             ContourType.SAX_LV_ENDOCARDIAL,
             ContourType.SAX_RV_FREEWALL,
             ContourType.SAX_RV_SEPTUM,
-            ContourType.SAX_RV_OUTLET,
+            ContourType.OUTLET_RV_FREEWALL,
+            ContourType.OUTLET_RV_FREEWALL,
+            ContourType.OUTLET_RV_SEPTUM,
+            ContourType.OUTLET_RV_SEPTUM,
+            ContourType.OUTLET_RV_EPICARDIAL,
+            ContourType.OUTLET_RV_EPICARDIAL,
+            ContourType.SAX_RV_EPICARDIAL,
             ContourType.SAX_LV_EPICARDIAL,
         ]
         lax_registered_contours = [
@@ -902,6 +918,12 @@ class GPDataSet(object):
             ContourType.LAX_RV_FREEWALL,
             ContourType.LAX_RV_SEPTUM,
             ContourType.LAX_RV_FREEWALL,
+            ContourType.SAX_RV_FREEWALL,
+            ContourType.LAX_RV_SEPTUM,
+            ContourType.SAX_RV_SEPTUM,
+            ContourType.LAX_RV_EPICARDIAL,
+            ContourType.SAX_RV_EPICARDIAL,
+            ContourType.LAX_RV_EPICARDIAL,
             ContourType.LAX_LV_EPICARDIAL,
         ]
 
@@ -1242,17 +1264,31 @@ class GPDataSet(object):
             ContourType.SAX_LV_ENDOCARDIAL,
             ContourType.SAX_RV_FREEWALL,
             ContourType.SAX_RV_SEPTUM,
-            ContourType.SAX_RV_OUTLET,
+            ContourType.OUTLET_RV_FREEWALL,
+            ContourType.OUTLET_RV_FREEWALL,
+            ContourType.OUTLET_RV_SEPTUM,
+            ContourType.OUTLET_RV_SEPTUM,
+            ContourType.OUTLET_RV_EPICARDIAL,
+            ContourType.OUTLET_RV_EPICARDIAL,
+            ContourType.SAX_RV_EPICARDIAL,
             ContourType.SAX_LV_EPICARDIAL,
         ]
+
         # additional contours to use for slice shift in case LAX is not fixed
         lax_registered_contours = [
             ContourType.LAX_LV_ENDOCARDIAL,
             ContourType.LAX_RV_FREEWALL,
             ContourType.LAX_RV_SEPTUM,
             ContourType.LAX_RV_FREEWALL,
+            ContourType.SAX_RV_FREEWALL,
+            ContourType.LAX_RV_SEPTUM,
+            ContourType.SAX_RV_SEPTUM,
+            ContourType.LAX_RV_EPICARDIAL,
+            ContourType.SAX_RV_EPICARDIAL,
+            ContourType.LAX_RV_EPICARDIAL,
             ContourType.LAX_LV_EPICARDIAL,
         ]
+
         associated_surface = [Surface.LV_ENDOCARDIAL]
         p2_reference = []
         intersection_points_2d = []
