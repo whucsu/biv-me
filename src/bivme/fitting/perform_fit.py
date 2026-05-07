@@ -80,7 +80,10 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
 
         errors = {}
         model_dict = {}
+        residual_dict = {}
+        dataset_dict = {}
         total_residual = 0.0
+        
         with ThreadPoolExecutor(max_workers=workers) as ex:
             # Set up futures queue
             futs = {
@@ -97,18 +100,60 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
                 try:
                     biv_model, residual = fut.result()
                     model_dict[num] = biv_model
-                    total_residual += residual  # will raise if the worker threw
+                    residual_dict[num] = residual
+                    dataset_dict[num] = data_set
+
+                    logger.info(f"[CHECKPOINT][BIV] Fit model for phase {num}")
                 except Exception as e:
                     errors[num] = e
-
-        logger.info(f"[CHECKPOINT][BIV] Fit model for phase {num}")
-        logger.info(f"[CHECKPOINT][RES] Residual: {residual}")
 
         # Handle any accumulated errors (only called at end)
         if errors:
             # Try to throw a summarized error
-            msg = "Some frames failed: " + ", ".join(f"{int(k):03d}: {type(v).__name__}" for k, v in errors.items())
+            msg = "Some frames failed: " + ", ".join(f"{k}: {type(v).__name__}" for k, v in errors.items())
             logger.error(msg)
+
+        # Perform refits if necessary
+        # Refitting works by checking if any frames have residuals above a certain threshold (e.g., 20% above median), and if so, 
+        # we attempt to re-fit those frames starting from a smaller initial model (e.g., at 0.67 scale) which can help with convergence in some outlier frames. 
+        refits = True
+        if refits:
+            logger.info(f"[CHECKPOINT][REFIT] Checking for outlier frames to re-fit...")
+
+            errors = {} # reset errors for refitting
+            limit = 1.2 # set limit as 20% above median (can be tuned or made a config parameter)
+            scale_steps = [1, 0.67, 0.33]
+
+            # Sort residual dict by largest residuals first 
+            # This way we recalculate the median after refitting the most worst model each time and can potentially catch more outliers in one pass (if they exist)
+            sorted_residual_dict = dict(sorted(residual_dict.items(), key=lambda item: item[1], reverse=True))
+
+            for num, residual in sorted_residual_dict.items():
+                if residual < 0: # skip frames that failed to fit at all
+                    continue
+                
+                median_residual = np.median(list(residual_dict.values()))
+                threshold = median_residual * limit
+                
+                if residual > threshold: # if residual is above threshold, attempt refit at different scales, starting from the second scale step (since the first is the original fit)
+                    try:
+                        model_dict[num], residual_dict[num] = refit_one_frame(config, dataset_dict[num], model_dict[num], residual, aligned_biv_model, scale_steps, threshold, num, logger)
+                    except Exception as e:
+                        errors[num] = e
+
+            # Handle any accumulated errors (only called at end)
+            if errors:
+                # Try to throw a summarized error
+                msg = "Some frames failed during refitting: " + ", ".join(f"{k}: {type(v).__name__}" for k, v in errors.items())
+                logger.error(msg)
+
+        # Log final residuals after refits
+        for num, residual in residual_dict.items():
+            logger.info(f"[CHECKPOINT][BIV] Fit model for phase {num}")
+            logger.info(f"[CHECKPOINT][RES] Residual: {residual}")
+
+        total_residual = sum(residual for residual in residual_dict.values() if residual >= 0) # only sum successful fits
+
         logger.info(f"[CHECKPOINT][FIT] Fitting models took: {time.time() - start_time}s")
 
         # Finalize
@@ -123,7 +168,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         write_all_gpfiles(gp_dataset_list, output_folder, case_name, logger)
         logger.info(f"[CHECKPOINT][WRITE] Writing out GP files to disk took: {time.time() - start_time}s")
 
-        return total_residual / len(frames_to_fit)
+        return total_residual / len(frames_to_fit) # return average residual across all frames (only counting successful fits)
 
     except KeyboardInterrupt:
         return -1
@@ -194,6 +239,40 @@ def _fit_one_frame(config, data_set, aligned_biv_model):
 
     ## Perform diffeomorphic fit
     residual = solve_convex_fast(biv_model, data_set, gp_weight, conv_weight, trans_weight, collision_detection=False, model_prior=None, my_logger=logger)
+
+    return biv_model, residual
+
+def refit_one_frame(config, data_set, biv_model, residual, aligned_biv_model, scale_steps, threshold, num, logger):
+    logger.warning(f"High residual ({residual:.2f}>{threshold:.2f}) detected for frame {num}, re-fitting at scale {scale_steps[1]}.")
+
+    retry_successful = False
+    for scale in scale_steps[1:]:
+        scale_idx = scale_steps.index(scale)
+        aligned_biv_model.update_pose_and_scale(data_set, scale) # update aligned model for this frame
+        retry_biv_model, retry_residual = _fit_one_frame(config, data_set, aligned_biv_model)
+        if retry_residual < residual:
+            biv_model = retry_biv_model
+            residual = retry_residual
+            retry_successful = True
+
+            if residual <= threshold:
+                logger.info(f"[CHECKPOINT][REFIT] Re-fit successful with scale {scale}, updating model for frame {num}.")
+                break
+            else:
+                if scale_idx + 1 < len(scale_steps):
+                    logger.warning(f"Re-fit at scale {scale} improved residual but still high for frame {num}, trying again with scale {scale_steps[scale_idx+1]}.")
+                else:
+                    logger.warning(f"Re-fit at scale {scale} improved residual but still high for frame {num}.")
+        else:
+            if scale_idx + 1 < len(scale_steps):
+                logger.warning(f"Re-fit at scale {scale} did not improve residual for frame {num}, trying again with scale {scale_steps[scale_idx+1]}.")
+            else:
+                logger.warning(f"Re-fit at scale {scale} did not improve residual for frame {num}.")
+
+    if not retry_successful:
+        logger.info(f"[CHECKPOINT][REFIT] All re-fits failed to improve residual for frame {num}, keeping original fit.")
+    elif residual > threshold:
+        logger.info(f"[CHECKPOINT][REFIT] Re-fits could not reduce residual below threshold for frame {num}, but we keep the improved fit.")
 
     return biv_model, residual
 

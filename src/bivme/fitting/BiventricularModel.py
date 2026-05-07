@@ -628,7 +628,7 @@ class BiventricularModel:
 
         return np.all(determinants >= min_jacobian)
 
-    def update_pose_and_scale(self, dataset: GPDataSet) -> None:
+    def update_pose_and_scale(self, dataset: GPDataSet, scale: float = 1.0) -> None:
         """A method that scale and translate the model to rigidly align
         with the guide points.
 
@@ -637,12 +637,13 @@ class BiventricularModel:
         Parameters
         ------------
         `dataset` GPDataSet object with guide points
+        'scale` scale factor to apply on top of the scaling factor calculated (used for refitting with different initial scale)
         Returns
         --------
 
         `scale_factor` scale factor between template and data points.
         """
-        scale_factor = self.get_scaling(dataset)
+        scale_factor = self.get_scaling(dataset) * scale
         self.update_control_mesh(self.control_mesh * scale_factor)
 
         # The rotation is defined about the origin so we need to translate the model to the origin
