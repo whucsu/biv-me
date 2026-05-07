@@ -77,7 +77,7 @@ def test_writenifti():
     write_nifti(slice_id, img, pixel_spacing, test_dst, view)
 
     # Find the generated nifti file
-    nifti_path = os.path.join(test_dst, view, f'{view}_3d_{slice_id}_0000.nii.gz')
+    nifti_path = os.path.join(test_dst, view, 'resized-cropped-normalised', f'{view}_3d_{slice_id}_0000.nii.gz')
     assert os.path.exists(nifti_path), 'Nifti file not found.'
 
     # Compare to reference

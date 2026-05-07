@@ -17,6 +17,13 @@ def extract_cines(src, dst, my_logger):
     processed_dcm_dir = os.path.join(dst, 'processed-dicoms')
     os.makedirs(processed_dcm_dir, exist_ok=True) # cine .dcms will be saved here
 
+    # Check the operating system
+    opsystem = None
+    if os.name == 'nt':  # Windows
+        opsystem = 'windows'
+    elif os.name == 'posix':  # Linux or macOS
+        opsystem = 'posix'
+
     file_paths = []
     excluded_descriptions = {}
     total_images = 0
@@ -27,8 +34,14 @@ def extract_cines(src, dst, my_logger):
         total_images += len(files)
         for file in files:
             # Read series description
+            filepath = os.path.join(root, file)
+
+            if len(filepath) > 260 and opsystem == 'windows':
+                # Need to reduce filepath length for Windows
+                filepath = '\\\\?\\' + filepath
+
             try:
-                dcm = pydicom.dcmread(os.path.join(root, file))
+                dcm = pydicom.dcmread(filepath, stop_before_pixels=True)  # Only read metadata, not pixel data for speed
             except:
                 my_logger.warning(f'Could not read {file}. Might not be a DICOM file.')
                 continue
@@ -45,7 +58,7 @@ def extract_cines(src, dst, my_logger):
             
             # Check if the description contains any of the inclusion terms and does not contain any of the exclusion terms
             if any(term in description for term in INCLUSION_TERMS) and not any(term in description for term in EXCLUSION_TERMS):
-                file_paths.append(os.path.join(root, file))
+                file_paths.append(filepath)
             else:
                 # Find offending term(s)
                 offences = []
@@ -85,9 +98,16 @@ def extract_cines(src, dst, my_logger):
             dcm = pydicom.dcmread(file)
             
             if len(files) == 1: # If there's only one file with this name, just save it
-                dcm.save_as(os.path.join(processed_dcm_dir, f))
+                try:
+                    dcm.save_as(os.path.join(processed_dcm_dir, f))
+                except Exception as e:
+                    my_logger.warning(f'Could not save {file} as {f}. Error: {e}')
                 continue
             else:
                 idx = files.index(file) # Get the index of the file in the set
                 f = f.replace('.dcm', '')  # Remove .dcm extension for indexing (added back in next line)
-                dcm.save_as(os.path.join(processed_dcm_dir, f'{f}_{idx}.dcm'))
+
+                try:
+                    dcm.save_as(os.path.join(processed_dcm_dir, f'{f}_{idx}.dcm'))
+                except Exception as e:
+                    my_logger.warning(f'Could not save {file} as {f}_{idx}.dcm. Error: {e}')

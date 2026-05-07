@@ -268,5 +268,5 @@ def write_all_gpfiles(gpdataset_list, output_folder, case_name, logger):
         # Write GP file
         frame_num = data_set.get_frame_num()
         gpfile_name = gpfile_folder / f"{case_name}_GPFile_{frame_num:03}.txt"
-        data_set.write_gpfile(str(gpfile_name), int(frame_num))
+        data_set.write_gpfile(str(gpfile_name), int(frame_num), overwrite=True)
         logger.success(f"{os.path.basename(gpfile_name)} successfully saved to {gpfile_name}")

@@ -11,6 +11,7 @@ from bivme.preprocessing.dicom.run_preprocessing_pipeline import perform_preproc
 from bivme.fitting.perform_fit import perform_fitting
 from bivme.plotting.plot_guidepoints import generate_html
 
+
 def validate_config_preprocessing(config, mylogger):
     assert os.path.exists(config["input_pp"]["source"]), \
         f'DICOM folder does not exist! Make sure to add the correct directory under "source" in the config file.'
@@ -23,13 +24,22 @@ def validate_config_preprocessing(config, mylogger):
         mylogger.error(f'Invalid correct mode: {config["view-selection"]["correct_mode"]}. Must be "automatic", "adaptive", or "manual".')
         sys.exit(0)
 
+    if not (config["view-selection"]["show_videos"] == True or config["view-selection"]["show_videos"] == False):
+        mylogger.error(f'Invalid show_videos option: {config["view-selection"]["show_videos"]}. Must be true or false.')
+        sys.exit(0)
+
     if not (config["contouring"]["smooth_landmarks"] == True or config["contouring"]["smooth_landmarks"] == False):
         mylogger.error(f'Invalid smooth_landmarks option: {config["contouring"]["smooth_landmarks"]}. Must be true or false.')
+        sys.exit(0)
+
+    if not (config["contouring"]["apply_postprocessing"] == True or config["contouring"]["apply_postprocessing"] == False):
+        mylogger.error(f'Invalid apply_postprocessing option: {config["contouring"]["apply_postprocessing"]}. Must be true or false.')
         sys.exit(0)
 
     if not (config["output_pp"]["overwrite"] == True or config["output_pp"]["overwrite"] == False):
         mylogger.error(f'Invalid overwrite option: {config["output_pp"]["overwrite"]}. Must be true or false.')
         sys.exit(0)
+
 
 def validate_config_fitting(config, mylogger):
     assert Path(config["input_fitting"]["gp_directory"]).exists(), \
@@ -64,6 +74,7 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument workers must be a positive integer. {config["multiprocessing"]["workers"]} given.')
         sys.exit(0)
 
+
 def run_preprocessing(case, config, mylogger):
     try:
         perform_preprocessing(case, config, mylogger)
@@ -88,12 +99,18 @@ def run_preprocessing(case, config, mylogger):
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
 
+
 def run_fitting(case, config, mylogger):
     try:
         if not config["logging"]["show_detailed_logging"]:
             mylogger.remove()
 
         mylogger.info(f"Processing {os.path.basename(case)}")
+
+        # Remove existing models if overwrite is true
+        if os.path.exists(os.path.join(config["output_fitting"]["output_directory"], case)) and config["output_fitting"]["overwrite"]: 
+            shutil.rmtree(os.path.join(config["output_fitting"]["output_directory"], case), ignore_errors=True)
+
         if config["logging"]["generate_log_file"]:
             log_level = "DEBUG"
             log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
@@ -104,6 +121,7 @@ def run_fitting(case, config, mylogger):
         folder = os.path.join(config["input_fitting"]["gp_directory"], case)
         gp_suffix = config["input_fitting"]["gp_suffix"]
         si_suffix = config["input_fitting"]["si_suffix"]
+
         start_time = time.time()
         residuals = perform_fitting(folder, config, out_dir=config["output_fitting"]["output_directory"], gp_suffix=gp_suffix, si_suffix=si_suffix,
                         workers=config["multiprocessing"]["workers"], output_format=config["output_fitting"]["mesh_format"], my_logger=logger)
@@ -114,15 +132,21 @@ def run_fitting(case, config, mylogger):
             start_time = time.time()
             gp_dir = os.path.join(config["output_fitting"]["output_directory"], case, "gpfiles") # directory where the guidepoints are saved after fitting
             model_dir = os.path.join(config["output_fitting"]["output_directory"], case) # directory where the fitted models are saved
-            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot
+            out_dir = os.path.join(config["output_fitting"]["output_directory"]) # output directory for the html plot\
 
             if config["plotting"]["include_images"]:
                 image_path = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"], case, "images")
             else:
                 image_path = None
 
+            if config["plotting"]["export_images"]:
+                vtk_export_path = os.path.join(config["output_fitting"]["output_directory"], case, "vtk-images")
+                os.makedirs(vtk_export_path, exist_ok=True)
+            else:
+                vtk_export_path = None
+
             generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
-                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path)
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path)
             
             mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
@@ -133,6 +157,7 @@ def run_fitting(case, config, mylogger):
     except KeyboardInterrupt:
         mylogger.info(f"Program interrupted by the user")
         sys.exit(0)
+
 
 if __name__ == "__main__":
     # Parse arguments
@@ -167,8 +192,8 @@ if __name__ == "__main__":
                         "processing": str(),
                         "states": str()
                         },
-            "view-selection": {"option": str(), "correct_mode": str()},
-            "contouring": {"smooth_landmarks": bool()},
+            "view-selection": {"option": str(), "correct_mode": str(), "show_videos": bool()},
+            "contouring": {"smooth_landmarks": bool(), "apply_postprocessing": bool()},
             "output_pp": {"overwrite": bool(), "output_directory": str()},
 
             "input_fitting": {"gp_directory": str(),
@@ -222,10 +247,6 @@ if __name__ == "__main__":
         # Edit gp_directory to point to the output of the preprocessing
         gp_dir = os.path.join(config["output_pp"]["output_directory"], config["input_pp"]["batch_ID"])
         config["input_fitting"]["gp_directory"] = gp_dir
-
-        # save a copy of the config file to the output folder
-        if config["output_pp"]["overwrite"] and os.path.exists(gp_dir):
-            shutil.rmtree(gp_dir)
             
         os.makedirs(gp_dir, exist_ok=True)
         shutil.copy(args.config_file, gp_dir)

@@ -1,11 +1,11 @@
 import os
 import nibabel as nib
-import matplotlib.pyplot as plt
 import numpy as np
 
 import bivme.preprocessing.dicom.src.contouring as contouring
 import bivme.preprocessing.dicom.src.guidepointprocessing as guidepointprocessing
 import bivme.preprocessing.dicom.src.utils as utils
+
 
 class SliceViewer:
     def __init__(self, processed_folder, slice_info_df, view, sliceID, es_phase, num_phases, full_cycle=True, my_logger=None):
@@ -22,6 +22,7 @@ class SliceViewer:
         self.slice = self.slice_info_df[(self.slice_info_df['View'] == self.view) & (self.slice_info_df['Slice ID'] == self.sliceID)]
         self.segmentation_folder = os.path.join(processed_folder, 'segmentations')
         self.segmentations = self.get_segmentations()
+        self.segmentations = self.qc_segmentations()  # QC segmentations
         self.get_contours()
         self.landmarks = None
         self.my_logger = my_logger
@@ -29,14 +30,39 @@ class SliceViewer:
     def get_segmentations(self):
         segmentations = []
 
-        segmentation = os.path.join(self.segmentation_folder, self.view, f"{self.view}_3d_{self.sliceID}.nii.gz")
+        segmentation = os.path.join(self.segmentation_folder, self.view, 'uncropped', f"{self.view}_3d_{self.sliceID}.nii.gz")
         segmentation = nib.load(segmentation).get_fdata()
-        segmentation = np.transpose(segmentation, (1, 0, 2))
+
         for i in range(0,segmentation.shape[2]):
             segmentations.append(segmentation[:,:,i])
 
         self.size = segmentations[0].shape
+        
         return segmentations
+    
+    def qc_segmentations(self):
+        corrected_segmentations = []
+        new_segmentation = np.zeros((self.size[0], self.size[1], len(self.phases)))
+
+        for i in range(len(self.phases)):
+            seg = self.segmentations[i]
+            corrected_seg = contouring.qc_segmentation(seg, self.view)
+            corrected_segmentations.append(corrected_seg)
+            new_segmentation[:,:,i] = corrected_seg
+
+        new_segmentation = new_segmentation.astype(np.uint8)
+
+        # new_segmentation = np.transpose(new_segmentation, (1, 0, 2)) # TODO: Check if transpose is needed
+
+        # Save corrected segmentations to nii file
+        if not os.path.exists(os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected')):
+            os.makedirs(os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected'), exist_ok=True)
+
+        segmentation_path = os.path.join(self.segmentation_folder, self.view, 'uncropped-corrected', f"{self.view}_3d_{self.sliceID}.nii.gz")
+        nib.save(nib.Nifti1Image(new_segmentation.astype(np.uint8), affine=np.eye(4)), segmentation_path)
+
+        # Update segmentations
+        return corrected_segmentations
     
     def get_initial_landmarks(self):
         self.get_landmarks_from_intersections()
@@ -88,31 +114,34 @@ class SliceViewer:
         if self.view == 'SAX':
             for i, phase in enumerate(self.phases):
                 try:
-                    self.rvi['SAX'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 2, 3, distance_cutoff=2.5)
+                    self.rvi['SAX'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 2, 3, distance_cutoff=1)
                 except:
                     self.rvi['SAX'][f'{phase}'] = None
 
         elif self.view == '2ch':
             for i, phase in enumerate(self.phases):
                 try:
-                    self.mv['2ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 3, distance_cutoff=3)
+                    self.mv['2ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 3, distance_cutoff=1)
                 except:
                     self.mv['2ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'Mitral valve not found on 2ch slice {self.sliceID} phase {phase}')
 
                 try:
                     self.lva['2ch'][f'{phase}'] = contouring.estimate_lva(self.contours[f'{phase}'][1], self.mv['2ch'][f'{phase}'][0],  self.mv['2ch'][f'{phase}'][1])
                 except:
                     self.lva['2ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'LVA not found on 2ch slice {self.sliceID} phase {phase}')
         
         elif self.view == '3ch':
             for i, phase in enumerate(self.phases):
                 try:
-                    self.mv['3ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 4, distance_cutoff=3)
+                    self.mv['3ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 4, distance_cutoff=1)
                 except:
                     self.mv['3ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'Mitral valve not found on 3ch slice {self.sliceID} phase {phase}')
                 
                 try:
-                    self.av['3ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 5, distance_cutoff=3)
+                    self.av['3ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 5, distance_cutoff=1)
                 except:
                     self.av['3ch'][f'{phase}'] = None
                     self.my_logger.warning(f'Aortic valve not found on 3ch slice {self.sliceID} phase {phase}')
@@ -121,16 +150,18 @@ class SliceViewer:
                     self.lva['3ch'][f'{phase}'] = contouring.estimate_lva(self.contours[f'{phase}'][1], self.mv['3ch'][f'{phase}'][0],  self.mv['3ch'][f'{phase}'][1])
                 except:
                     self.lva['3ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'LVA not found on 3ch slice {self.sliceID} phase {phase}')
 
         elif self.view == '4ch':
             for i, phase in enumerate(self.phases):
                 try:
-                    self.mv['4ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 4, distance_cutoff=3)
+                    self.mv['4ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 4, distance_cutoff=1)
                 except:
                     self.mv['4ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'Mitral valve not found on 4ch slice {self.sliceID} phase {phase}')
                 
                 try:
-                    self.tv['4ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 3, 5, distance_cutoff=3)
+                    self.tv['4ch'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 3, 5, distance_cutoff=1)
                 except:
                     self.tv['4ch'][f'{phase}'] = None
                     self.my_logger.warning(f'Tricuspid valve not found on 4ch slice {self.sliceID} phase {phase}')
@@ -139,13 +170,15 @@ class SliceViewer:
                     self.lva['4ch'][f'{phase}'] = contouring.estimate_lva(self.contours[f'{phase}'][1], self.mv['4ch'][f'{phase}'][0],  self.mv['4ch'][f'{phase}'][1])
                 except:
                     self.lva['4ch'][f'{phase}'] = None
+                    self.my_logger.warning(f'LVA not found on 4ch slice {self.sliceID} phase {phase}')
 
         elif self.view == 'RVOT':
             for i, phase in enumerate(self.phases):
                 try:
-                    self.pv['RVOT'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 3, distance_cutoff=3)
+                    self.pv['RVOT'][f'{phase}'] = contouring.get_valve_points_from_intersections(self.segmentations[i], 1, 3, distance_cutoff=1)
                 except:
                     self.pv['RVOT'][f'{phase}'] = None
+                    self.my_logger.warning(f'Pulmonary valve not found on RVOT slice {self.sliceID} phase {phase}')
     
         else:
             self.my_logger.warning(f'Invalid view: {self.view}. Must be one of SAX, 2ch, 3ch, 4ch, or RVOT.')
@@ -172,228 +205,10 @@ class SliceViewer:
         
         self.contours = contours
 
-    # TODO: Remove this - redundant
-    def clean_lax(self):
-        if self.view == '4ch':
-            # remove points that are not on the endocardial contours
-            for phase in self.phases:
-                LV_endo = self.contours[str(phase)][0]
-                LV_epi = self.contours[str(phase)][1]
-                RV_endo = self.contours[str(phase)][0]
-                RV_septal = self.contours[str(phase)][2]
-                RV_epi = self.contours[str(phase)][1]
-
-
-                MV_pts = self.mv[self.view][str(phase)]
-                TV_pts = self.tv[self.view][str(phase)]
-
-                # Clean between mitral valve points
-                del_idx = []
-                for i in range(len(LV_endo)):
-                    point = LV_endo[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_endo = np.delete(LV_endo, del_idx, axis=0)
-                self.contours[str(phase)][4] = LV_endo
-
-                del_idx = []
-                for i in range(len(LV_epi)):
-                    point = LV_epi[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_epi = np.delete(LV_epi, del_idx, axis=0)
-                self.contours[str(phase)][3] = LV_epi
-
-                # Clean between tricuspid valve points
-                del_idx = []
-                for i in range(len(RV_endo)):
-                    point = RV_endo[i]
-                    valve_dist = np.linalg.norm(TV_pts[1] - TV_pts[0])
-                    distance1 = np.linalg.norm(TV_pts[1] - point)
-                    distance2 = np.linalg.norm(TV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                RV_endo = np.delete(RV_endo, del_idx, axis=0)
-                self.contours[str(phase)][0] = RV_endo
-
-                del_idx = []
-                for i in range(len(RV_septal)):
-                    point = RV_septal[i]
-                    valve_dist = np.linalg.norm(TV_pts[1] - TV_pts[0])
-                    distance1 = np.linalg.norm(TV_pts[1] - point)
-                    distance2 = np.linalg.norm(TV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                RV_septal = np.delete(RV_septal, del_idx, axis=0)
-                self.contours[str(phase)][2] = RV_septal
-
-        elif self.view == '3ch':
-            # remove points that are not on the endocardial contours
-            for phase in self.phases:
-                RV_endo = self.contours[str(phase)][0]
-                RV_epi = self.contours[str(phase)][1]
-                RV_septal = self.contours[str(phase)][2]
-                LV_epi = self.contours[str(phase)][3]
-                LV_endo = self.contours[str(phase)][4]
-
-                MV_pts = self.mv[self.view][str(phase)]
-                AV_pts = self.av[self.view][str(phase)]
-
-                # Clean between mitral valve points
-                del_idx = []
-                for i in range(len(LV_endo)):
-                    point = LV_endo[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_endo = np.delete(LV_endo, del_idx, axis=0)
-                self.contours[str(phase)][4] = LV_endo
-
-                del_idx = []
-                for i in range(len(LV_epi)):
-                    point = LV_epi[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_epi = np.delete(LV_epi, del_idx, axis=0)
-                self.contours[str(phase)][3] = LV_epi
-
-                # Clean between aortic valve points
-                del_idx = []
-                for i in range(len(LV_endo)):
-                    point = LV_endo[i]
-                    valve_dist = np.linalg.norm(AV_pts[1] - AV_pts[0])
-                    distance1 = np.linalg.norm(AV_pts[1] - point)
-                    distance2 = np.linalg.norm(AV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_endo = np.delete(LV_endo, del_idx, axis=0)
-                self.contours[str(phase)][4] = LV_endo
-
-                del_idx = []
-                for i in range(len(LV_epi)):
-                    point = LV_epi[i]
-                    valve_dist = np.linalg.norm(AV_pts[1] - AV_pts[0])
-                    distance1 = np.linalg.norm(AV_pts[1] - point)
-                    distance2 = np.linalg.norm(AV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-
-                LV_epi = np.delete(LV_epi, del_idx, axis=0)
-                self.contours[str(phase)][3] = LV_epi
-
-        elif self.view == '2ch':
-            # remove points that are not on the endocardial contours
-            for phase in self.phases:
-                LV_endo = self.contours[str(phase)][0]
-                LV_epi = self.contours[str(phase)][1]
-
-                MV_pts = self.mv[self.view][str(phase)]
-
-                # Clean between mitral valve points
-                del_idx = []
-                for i in range(len(LV_endo)):
-                    point = LV_endo[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_endo = np.delete(LV_endo, del_idx, axis=0)
-                self.contours[str(phase)][0] = LV_endo
-
-                del_idx = []
-                for i in range(len(LV_epi)):
-                    point = LV_epi[i]
-                    valve_dist = np.linalg.norm(MV_pts[1] - MV_pts[0])
-                    distance1 = np.linalg.norm(MV_pts[1] - point)
-                    distance2 = np.linalg.norm(MV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                LV_epi = np.delete(LV_epi, del_idx, axis=0)
-                self.contours[str(phase)][1] = LV_epi
-        
-        elif self.view == 'RVOT':
-            # remove points that are not on the endocardial contours
-            for phase in self.phases:
-                RV_endo = self.contours[str(phase)][0]
-                RV_septal = self.contours[str(phase)][1]
-
-                PV_pts = self.pv[self.view][str(phase)]
-
-                # Clean between pulmonary valve points
-                del_idx = []
-                for i in range(len(RV_endo)):
-                    point = RV_endo[i]
-                    valve_dist = np.linalg.norm(PV_pts[1] - PV_pts[0])
-                    distance1 = np.linalg.norm(PV_pts[1] - point)
-                    distance2 = np.linalg.norm(PV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                RV_endo = np.delete(RV_endo, del_idx, axis=0)
-                self.contours[str(phase)][0] = RV_endo
-
-                del_idx = []
-                for i in range(len(RV_septal)):
-                    point = RV_septal[i]
-                    valve_dist = np.linalg.norm(PV_pts[1] - PV_pts[0])
-                    distance1 = np.linalg.norm(PV_pts[1] - point)
-                    distance2 = np.linalg.norm(PV_pts[0] - point)
-                    point_dist = distance1 + distance2
-
-                    if abs(point_dist-valve_dist) < 3:
-                        del_idx.append(i)
-                
-                RV_septal = np.delete(RV_septal, del_idx, axis=0)
-                self.contours[str(phase)][1] = RV_septal
-
     def get_slice_info(self):
         self.imgPos = self.slice['ImagePositionPatient'].values[0]
         self.imgOrient = self.slice['ImageOrientationPatient'].values[0]
         self.ps = self.slice['Pixel Spacing'].values[0]
-
 
     def smooth_landmarks(self, landmarks):
         # Smooth landmarks by applying an low pass filter
@@ -460,6 +275,9 @@ class SliceViewer:
         return smoothed_landmarks
     
     def smooth_LVA(self, landmarks):
+        if np.any([x is None for x in landmarks]):
+            return landmarks # No smoothing if there are missing landmarks
+        
         # No need to correct for orientation, so just smooth
         harmonic_divisor = 4 # Low pass filter will keep num_phases/harmonic_divisor harmonics. E.g. if you have 30 frames and harmonic_divisor=4, it will keep the first 7 harmonics.
 
@@ -563,10 +381,16 @@ class SliceViewer:
                 #             'SAX_RV_SEPTUM',
                 #             'SAX_RV_EPICARDIAL',
                 #             'PULMONARY_VALVE']
+
                 labels = ['LAX_RV_FREEWALL',
                             'LAX_RV_SEPTUM',
                             'LAX_RV_EPICARDIAL',
                             'PULMONARY_VALVE']
+
+                # labels = ['OUTLET_RV_FREEWALL',
+                #             'OUTLET_RV_SEPTUM',
+                #             'OUTLET_RV_EPICARDIAL',
+                #             'PULMONARY_VALVE']
 
                 for i,points in enumerate(point_lists):
                     if points is None:
@@ -726,7 +550,6 @@ class SliceViewer:
 
                         pts = [guidepointprocessing.inverse_coordinate_transformation(points, self.imgPos, self.imgOrient, self.ps)]
 
-
                     else:
                         pts = [guidepointprocessing.inverse_coordinate_transformation(point, self.imgPos, self.imgOrient, self.ps)
                                 for point in points]
@@ -824,12 +647,3 @@ class SliceViewer:
                         
                     # Write to file
                     guidepointprocessing.write_to_gp_file(output_folder + f'/GPFile_{int(phase):03}.txt', pts, labels[i], self.sliceID, weight=1.0, phase=int(phase))
-
-
-        
-
-        
-    
-
-
-    

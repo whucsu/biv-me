@@ -15,7 +15,7 @@ from bivme.preprocessing.dicom.select_views import select_views
 from bivme.preprocessing.dicom.segment_views import segment_views
 from bivme.preprocessing.dicom.correct_phase_mismatch import correct_phase_mismatch
 from bivme.preprocessing.dicom.generate_contours import generate_contours
-from bivme.preprocessing.dicom.export_guidepoints import export_guidepoints
+from bivme.preprocessing.dicom.export_guidepoints import export_guidepoints, apply_guidepoint_postprocessing
 from bivme.plotting.plot_guidepoints import generate_html # for plotting guidepoints
 
 
@@ -25,6 +25,7 @@ def perform_preprocessing(case, config, mylogger):
 
     # Unpack config parameters
     # Input
+    start_time = time.time()
     src = os.path.join(config["input_pp"]["source"], case)
 
     # Processing
@@ -44,8 +45,6 @@ def perform_preprocessing(case, config, mylogger):
     if os.path.exists(output):
         shutil.rmtree(output) # remove existing directory
     os.makedirs(output, exist_ok=True) # create new directory
-
-    plotting = os.path.join(config["input_pp"]["processing"], config["input_pp"]["batch_ID"]) # save the plotted htmls in processed directory
 
     # Logging
     if not config["logging"]["show_detailed_logging"]:
@@ -78,13 +77,21 @@ def perform_preprocessing(case, config, mylogger):
     mylogger.success(f'Pre-preprocessing complete. Cines extracted to {src}.')
 
     ## Step 1: View selection
-    slice_info_df, num_phases = select_views(case, src, dst, MODEL_DIR, states, config["view-selection"]["option"], 
-                                                            config["view-selection"]["correct_mode"], mylogger)
+    slice_info_df, num_phases = select_views(case, src, dst, MODEL_DIR, states, config, mylogger)
 
     mylogger.success(f'View selection complete.')
     mylogger.info(f'Number of phases: {num_phases}')
 
-    ## Step 2: Segmentation
+    # Check if there's any 4ch selected
+    if slice_info_df.empty:
+        mylogger.error(f'No views were selected for case {case}. Please check the view selection output and adjust the view selection parameters in the config file if necessary.')
+        return
+    else:
+        four_ch_views = slice_info_df[slice_info_df['View'] == '4ch']
+        if four_ch_views.empty:
+            mylogger.warning(f'No 4ch views were selected for case {case}. Segmentations and guidepoints will be created, but no meshes will be generated due to the lack of tricuspid valve points...')
+
+    # # Step 2: Segmentation
     seg_start_time = time.time()
     mylogger.info(f'Starting segmentation...')
     segment_views(dst, MODEL_DIR, slice_info_df, mylogger) # TODO: Find a way to suppress nnUnet output
@@ -102,8 +109,14 @@ def perform_preprocessing(case, config, mylogger):
     export_guidepoints(dst, output, slice_dict, config["contouring"]["smooth_landmarks"])
     mylogger.success(f'Guide points exported successfully.')
 
+    # Step 4.1: Post-process guidepoints (if desired)
+    if config["contouring"]["apply_postprocessing"]:
+        apply_guidepoint_postprocessing(output, case, mylogger)
+        mylogger.success(f'Post-processing of guidepoints was successful.')
+
+    mylogger.info(f'Total time taken for preprocessing: {time.time() - start_time} seconds.')
+
     if config["logging"]["generate_log_file"]:
         mylogger.remove(logger_id)
         # Copy log file to states directory
         shutil.copyfile(f'{output}/log_file_{time_string}.log', os.path.join(states, f'log_file_{time_string}.log'))
-

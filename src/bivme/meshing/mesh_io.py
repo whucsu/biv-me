@@ -82,8 +82,8 @@ def export_to_obj(file_name: os.PathLike, vertices: np.ndarray, faces: np.ndarra
 
 def export_mesh(output_format, output_dir, filename, vertices, faces, logger):
     writers = {
-        ".vtk": ("vtk", write_vtk_surface),
-        ".obj": ("obj", export_to_obj),
+        ".vtk": ("vtk-meshes", write_vtk_surface),
+        ".obj": ("obj-meshes", export_to_obj),
     }
 
     if output_format in writers:

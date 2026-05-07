@@ -26,8 +26,8 @@ def test_performed_fit():
                         "processing": str(),
                         "states": str()
                         },
-            "view-selection": {"option": str(), "correct_mode": str()},
-            "contouring": {"smooth_landmarks": bool()},
+            "view-selection": {"option": str(), "correct_mode": str(), "show_videos": bool()},
+            "contouring": {"smooth_landmarks": bool(), "apply_postprocessing": bool()},
             "output_pp": {"overwrite": bool(), "output_directory": str()},
 
             "input_fitting": {"gp_directory": str(),

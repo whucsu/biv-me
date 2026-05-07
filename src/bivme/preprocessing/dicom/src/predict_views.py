@@ -14,6 +14,7 @@ from bivme.preprocessing.dicom.src.viewselection import ViewSelector
 from bivme.preprocessing.dicom.src.guidepointprocessing import inverse_coordinate_transformation
 from bivme.preprocessing.dicom.src.utils import plane_intersect
 
+
 class CustomImageDataset(Dataset):
     def __init__(self, annotations_file, img_dir, transform=None, target_transform=None):
         self.img_labels = pd.read_csv(annotations_file)
@@ -40,6 +41,7 @@ def predict_views(vs):
         predict_on_metadata(vs)
     elif vs.type == 'image':
         predict_on_images(vs)
+
 
 def predict_on_metadata(vs):
     vs.prepare_data_for_prediction()
@@ -156,6 +158,7 @@ def predict_on_metadata(vs):
     output_df = pd.DataFrame(view_predictions, columns=['Series Number', 'View Class'])
     output_df.to_csv(vs.csv_path, mode='w', index=False)
 
+
 def predict_on_images(vs):
     vs.prepare_data_for_prediction()
 
@@ -163,8 +166,11 @@ def predict_on_images(vs):
         vs.my_logger.error("No series found. This means that after excluding invalid series descriptions and images with less than 10 frames, this case has no eligible cine images. Please check your input directory.")
         sys.exit(0)
 
-    view_label_map = {'2ch': 0, '2ch-RT': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
+    old_view_label_map = {'2ch': 0, '2ch-RT': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
                 'OTHER': 5, 'RVOT': 6, 'RVOT-T': 7, 'SAX': 8, 'SAX-atria': 9}
+    
+    view_label_map = {'2ch': 0, '2ch-RV': 1, '3ch': 2, '4ch': 3, 'LVOT': 4, 
+            'SAX-other': 5, 'RVOT': 6, 'RVOT-oblique': 7, 'SAX': 8, 'SAX-atria': 9}
     
     test_annotations = os.path.join(vs.dst, 'view-classification', 'test_annotations.csv') # Dummy annotations file
     dir_img_test = os.path.join(vs.dst, 'view-classification', 'unsorted') # Directory of images to predict. Predictions are run on .pngs
@@ -178,7 +184,7 @@ def predict_on_images(vs):
         device = torch.device("cpu")
 
     try:
-        loaded_model_path = glob.glob(os.path.join(vs.model, "ViewSelection") + "/resnet50*.pth")[0]
+        loaded_model_path = glob.glob(os.path.join(vs.model, "ViewSelection") + "/resnet50-v32.pth")[0]
     except IndexError:
         vs.my_logger.error("No image view selection model found. Make sure you followed the installation instructions for installing the deep learning models.")
         sys.exit(0)
@@ -263,7 +269,6 @@ def predict_on_images(vs):
                                         f'{list(view_label_map.keys())[8]} confidence',
                                         f'{list(view_label_map.keys())[9]} confidence'])
 
-
     # Determine view class from majority vote across all frames
     for series in vs.df['Series Number'].unique():
         series_views = test_pred_df[test_pred_df['image_name'].str.startswith(f'{series}_')]
@@ -298,7 +303,6 @@ def predict_on_images(vs):
                                 f'{list(view_label_map.keys())[7]} confidence': [confidences[7]],
                                 f'{list(view_label_map.keys())[8]} confidence': [confidences[8]],
                                 f'{list(view_label_map.keys())[9]} confidence': [confidences[9]]})
-
         
         output_df = pd.concat([output_df, new_row], ignore_index=True)
     

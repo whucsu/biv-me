@@ -7,10 +7,12 @@ from PIL import Image, ImageTk
 import pandas as pd
 from idlelib.tooltip import Hovertip
 
-LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
+
+OLD_LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'OTHER', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RT', 'RVOT-T', 'Excluded']
+LIST_OF_VIEWS = ['SAX-atria', 'SAX', 'SAX-other', '2ch', '3ch', '4ch', 'RVOT', 'LVOT', '2ch-RV', 'RVOT-oblique', 'Excluded']
 
 class VSGUI:
-    def __init__(self, patient, dst, viewSelector, my_logger):
+    def __init__(self, patient, dst, viewSelector, show_videos, my_logger):
         self.patient = patient
         self.dst = dst
         self.view_predictions = pd.read_csv(viewSelector.csv_path)
@@ -18,6 +20,7 @@ class VSGUI:
         self.viewSelector = viewSelector
         self.my_logger = my_logger
         self.sequence_running = None
+        self.show_videos = show_videos
         self.create_window()
 
     def create_window(self):
@@ -28,7 +31,7 @@ class VSGUI:
             screen_width = 1920 - 100  # Doesn't need to be larger than 1920
         else:
             screen_width = self.window.winfo_screenwidth() - 100  # Leave some margin
-
+            
         self.scaling = screen_width / 1366  # Scale based on 1366x768 width 
         width = int(1366 * self.scaling) # Set window width to 1366 scaled
         height = int(768 * self.scaling) # Set window height to 768 scaled
@@ -194,7 +197,6 @@ class VSGUI:
 
             self.img_dict[series] = loaded_images
 
-
         self.list_of_images = []
         self.list_of_dropdowns = []
         self.counters = []
@@ -235,7 +237,9 @@ class VSGUI:
             
             # Display full sequence by default
             self.counters.append(0)
-            self.display_full_sequence(None, i)
+
+            if self.show_videos:
+                self.display_full_sequence(None, i) # Comment this line to disable video display
 
             # Add series number text with outline
             lbl_series = tk.Label(master=self.window, text=f'Series {series}', fg='black', bg='white', border=2, highlightcolor=color, highlightbackground=color, font=('Arial', 10))
