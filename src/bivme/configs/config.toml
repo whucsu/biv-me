@@ -218,13 +218,14 @@ lsq_trans_weight = 0.001
 
 [refitting]
 perform_refits = true
-# Decide whether potentially non-convergent outliers with high residuals are refit with a different initial model scale
+# Decide whether potentially non-convergent outlier frames with high residuals are refit with a different initial model scale. 
 # Default:  true
 
 threshold_factor = 1.2
-# Set the multiplicative factor by which the threshold of residuals for applying refits is performed. This threshold factor is multiplied by the median residual across all frames for a given case to determine the absolute threshold. 
-# Frames with residuals above the absolute threshold will be considered as outliers and will be attempted to be refit
-# The given example will ensure refitting on frames where residuals are >20% higher than the median.
+# Set the multiplicative threshold above the median residual to determine whether a frame should be refit. This given threshold factor is multiplied by the median residual across all frames for a given case to determine the absolute threshold. 
+# Frames with residuals above the absolute threshold will be considered as outliers and will be attempted to be refit.
+# The given example will ensure refitting is applied on frames where residuals are >20% higher than the median.
+# Set this to be higher if non-outlier frames are being unnecessarily refit, and lower if it outliers are not being caught. 
 # Default:  1.2 
 
 [output_fitting]

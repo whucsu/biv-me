@@ -49,6 +49,54 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument shifting must be derived_from_ed, average_all_frames or none. {config["breathhold_correction"]["shifting"]} given.')
         sys.exit(0)
 
+    if not config["breathhold_correction"]["ed_frame"] >= 0:
+        mylogger.error(f'argument ed_frame must be a non-negative integer. {config["breathhold_correction"]["ed_frame"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["sampling"] > 0:
+        mylogger.error(f'argument sampling must be a positive integer. {config["gp_processing"]["sampling"]} given.')
+        sys.exit(0)
+    
+    if not config["gp_processing"]["num_of_phantom_points_av"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_av must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_av"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_mv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_mv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_mv"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_tv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_tv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_tv"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_pv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_pv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_pv"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["guide_points"] >= 0:
+        mylogger.error(f'argument guide_points weight must be a non-negative number. {config["fitting_weights"]["guide_points"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["convex_problem"] >= 0:
+        mylogger.error(f'argument convex_problem weight must be a non-negative number. {config["fitting_weights"]["convex_problem"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["transmural"] >= 0:
+        mylogger.error(f'argument transmural weight must be a non-negative number. {config["fitting_weights"]["transmural"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["lsq_trans_weight"] >= 0:
+        mylogger.error(f'argument lsq_trans_weight must be a non-negative number. {config["fitting_weights"]["lsq_trans_weight"]} given.')
+        sys.exit(0)
+
+    if not (config["refitting"]["perform_refits"] == True or config["refitting"]["perform_refits"] == False):
+        mylogger.error(f'argument perform_refits must be true or false. {config["refitting"]["perform_refits"]} given.')
+        sys.exit(0)
+
+    if not config["refitting"]["threshold_factor"] >= 1:
+        mylogger.error(f'argument threshold_factor must be a number greater than or equal to 1. {config["refitting"]["threshold_factor"]} given.')
+        sys.exit(0)
+
     if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
         mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
         sys.exit(0)
@@ -204,6 +252,7 @@ if __name__ == "__main__":
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
             "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float(), "lsq_trans_weight": float()},
+            "refitting": {"perform_refits": bool(), "threshold_factor": float()},
             "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass

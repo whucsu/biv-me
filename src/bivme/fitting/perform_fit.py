@@ -83,7 +83,7 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         residual_dict = {}
         dataset_dict = {}
         total_residual = 0.0
-        
+
         with ThreadPoolExecutor(max_workers=workers) as ex:
             # Set up futures queue
             futs = {
@@ -116,12 +116,11 @@ def perform_fitting(folder: str,  config: dict, out_dir: str ="./results/", gp_s
         # Perform refits if necessary
         # Refitting works by checking if any frames have residuals above a certain threshold (e.g., 20% above median), and if so, 
         # we attempt to re-fit those frames starting from a smaller initial model (e.g., at 0.67 scale) which can help with convergence in some outlier frames. 
-        refits = True
-        if refits:
+        if config["refitting"]["perform_refits"]:
             logger.info(f"[CHECKPOINT][REFIT] Checking for outlier frames to re-fit...")
 
             errors = {} # reset errors for refitting
-            limit = 1.2 # set limit as 20% above median (can be tuned or made a config parameter)
+            limit = config["refitting"]["threshold_factor"] # set limit X% above median to trigger refit
             scale_steps = [1, 0.67, 0.33]
 
             # Sort residual dict by largest residuals first 

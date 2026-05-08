@@ -38,6 +38,7 @@ def test_performed_fit():
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
             "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float(), "lsq_trans_weight": float()},
+            "refitting": {"perform_refits": bool(), "threshold_factor": float()},
             "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass
