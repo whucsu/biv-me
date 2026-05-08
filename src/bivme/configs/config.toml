@@ -216,6 +216,17 @@ transmural = 0.01
 lsq_trans_weight = 0.001
 # Default: 0.001
 
+[refitting]
+perform_refits = true
+# Decide whether potentially non-convergent outliers with high residuals are refit with a different initial model scale
+# Default:  true
+
+threshold_factor = 1.2
+# Set the multiplicative factor by which the threshold of residuals for applying refits is performed. This threshold factor is multiplied by the median residual across all frames for a given case to determine the absolute threshold. 
+# Frames with residuals above the absolute threshold will be considered as outliers and will be attempted to be refit
+# The given example will ensure refitting on frames where residuals are >20% higher than the median.
+# Default:  1.2 
+
 [output_fitting]
 export_control_mesh = false
 # Decide whether or not to save the coarse mesh. If true, the coarse mesh will be generated (format: mesh_format)
@@ -247,6 +258,6 @@ output_directory = "../output/"
 # default: "../output/"
 
 [multiprocessing]
-workers = 1
+workers = 3
 # number of workers to use for multi processing
-# default: 1
+# default: 3
