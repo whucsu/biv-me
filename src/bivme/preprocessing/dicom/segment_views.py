@@ -4,12 +4,12 @@ import torch
 import nibabel as nib
 import numpy as np
 
-from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-
 # Set nnUNet environment variables so it doesn't scream at you with warnings
 os.environ['nnUNet_raw'] = '.'
 os.environ['nnUNet_preprocessed'] = '.'
 os.environ['nnUNet_results'] = '.'
+
+from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
 from bivme.preprocessing.dicom.src.utils import write_nifti
 from bivme.preprocessing.dicom.src.utils import write_sliceinfofile
@@ -42,7 +42,12 @@ def init_nnUNetv2(model_folder, my_logger):
     return predictor
 
 
-def predict_view(input_folder, output_folder, model, view, dataset, my_logger):
+def predict_view(input_folder, output_folder, model, view, dataset, workers, my_logger):
+    # Split workers between preprocessing and segmentation export
+    # Will use only 1 worker for export, and the rest for preprocessing as it is more intensive
+    pp_workers = max(workers-1, 1)  # At least 1 worker for preprocessing
+    export_workers = max(workers - pp_workers, 1)  # At least 1 worker for export
+
     # Define the trained model to use (Specified by the Task)
     model_folder_name = os.path.join(model,"Segmentation/{}/nnUNetTrainer__nnUNetPlans__3d_fullres/".format(dataset))
     
@@ -57,8 +62,8 @@ def predict_view(input_folder, output_folder, model, view, dataset, my_logger):
         predictor.predict_from_files(
             view_input_folder,
             view_output_folder,
-            save_probabilities=False, overwrite=True, num_processes_preprocessing=2, 
-            num_processes_segmentation_export=2,
+            save_probabilities=False, overwrite=True, num_processes_preprocessing=pp_workers, 
+            num_processes_segmentation_export=export_workers,
             folder_with_segs_from_prev_stage=None, num_parts=1, part_id=0
         )
 
@@ -114,7 +119,7 @@ def reassemble_full_segmentation(input_folder, output_folder, view, slice_info_d
         nib.save(full_seg_nii, os.path.join(new_view_output_folder, f'{view}_3d_{img_id}.nii.gz'))
 
 
-def segment_views(dst, model, slice_info_df, my_logger):
+def segment_views(dst, model, slice_info_df, workers, my_logger):
     # define I/O parameters for nnUnet segmentation
     input_folder = os.path.join(dst, 'images')
     output_folder = os.path.join(dst, 'segmentations')
@@ -163,7 +168,7 @@ def segment_views(dst, model, slice_info_df, my_logger):
         
         dataset = datasets_3d[i]
 
-        predict_view(input_folder, output_folder, model, view, dataset, my_logger) # generate segmentations for each view 
+        predict_view(input_folder, output_folder, model, view, dataset, workers, my_logger) # generate segmentations for each view 
 
         reassemble_full_segmentation(input_folder, output_folder, view, slice_info_df, my_logger) # convert segmentations back to original dimensions by padding (i.e. 'uncropping')
 

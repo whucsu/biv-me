@@ -19,6 +19,11 @@ fitting = true
 # * false   : Do not run this module
 # Default: true
 
+[multiprocessing]
+workers = 4
+# Number of workers to use for multi processing. This has been set conservatively low, and can be increased to speed up segmentation and fitting. If you run into CPU or memory issues, reduce this.
+# default: 4
+
 [logging]
 show_detailed_logging = true
 # Change the log visibility for preprocessing and fitting. Useful for debugging and oversight.
@@ -257,8 +262,3 @@ overwrite = false
 output_directory = "../output/"
 # Define where to save the fitted models and files
 # default: "../output/"
-
-[multiprocessing]
-workers = 3
-# number of workers to use for multi processing
-# default: 3
