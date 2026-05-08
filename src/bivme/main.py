@@ -161,7 +161,7 @@ def run_preprocessing(case, config, mylogger):
             else:
                 image_path = None
 
-            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path)
+            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path, vtk_export_path=None, workers=config["multiprocessing"]["workers"])
 
             mylogger.info(f'Generated html plots (preprocessing) at {os.path.join(plotting,case,"html")}.')
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
@@ -217,7 +217,7 @@ def run_fitting(case, config, mylogger):
                 vtk_export_path = None
 
             generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
-                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path)
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path, workers=config["multiprocessing"]["workers"])
             
             mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
