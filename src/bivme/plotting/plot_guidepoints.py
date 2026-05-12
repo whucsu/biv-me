@@ -374,7 +374,7 @@ if __name__ == "__main__":
                         help='Define the directory containing the model files', default = None)
     parser.add_argument('-idir', '--image_directory', type=Path,
                         help='Define the directory containing the image files', default = None)
-    parser.add_argument('--vtkdir', '--vtk_directory', type=Path, default=None, help='Define the directory to which the image VTK files will be exported. If not provided, VTK files will not be exported.')
+    parser.add_argument('-vtkdir', '--vtk_directory', type=Path, default=None, help='Define the directory to which the image VTK files will be exported. If not provided, VTK files will not be exported.')
 
     args = parser.parse_args()
 
@@ -415,7 +415,7 @@ if __name__ == "__main__":
                     model_dir = None
 
                 if args.image_directory is not None:
-                    image_dir = Path(args.image_directory) / case / "images" / "resized"
+                    image_dir = Path(args.image_directory) / case / "images"
                 else:
                     image_dir = None
 
