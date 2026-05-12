@@ -185,3 +185,4 @@ src/output
 demo/processing
 demo/states/test-run
 demo/guidepoints/test-run
+demo/fitted-models/test-run
