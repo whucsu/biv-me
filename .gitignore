@@ -182,6 +182,7 @@ src/pyezzi/pyezzi
 
 # Directories potentially created by running example code
 src/output
+src/analysis/example_volumes
 demo/processing
 demo/states/test-run
 demo/guidepoints/test-run
