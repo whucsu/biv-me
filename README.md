@@ -1,15 +1,17 @@
 <div align="center">
 
+### 12th May, 2026: [v1.2 major update - improved segmentation and optimised model fitting](https://github.com/UOA-Heart-Mechanics-Research/biv-me/releases/tag/v1.2)
+Major update provides new segmentation and view selection models designed for greater generalisability, and significantly reworks model fitting for enhanced performance. 
+
 ### 9th September, 2025: [v1.1.6 update - new visualisation tools](https://github.com/UOA-Heart-Mechanics-Research/biv-me/releases/tag/v1.1.6)
 Update adds tools to visualise images alongisde models to help visual inspection of mesh reconstruction and create eye-catching videos. 
 
 ### 28th July, 2025: [v1.1.5 update - improved view selection & smoother landmarks](https://github.com/UOA-Heart-Mechanics-Research/biv-me/releases/tag/v1.1.5)
 Update significantly improves view selection by overhauling metadata-based prediction, and adds new config option for more temporally consistent landmarks.
 
-### 4th June, 2025: [New v1.1 deep learning models for view selection and segmentation are available!](https://github.com/UOA-Heart-Mechanics-Research/biv-me-dl-models) 
-Refer to the [FAQs](#faqs) on how to update your models.
 
-# Biventricular modelling pipeline (biv-me)
+
+# Biventricular modelling pipeline (biv-me) - **v1.2**
 ![Python version](https://img.shields.io/badge/python-3.11-blue)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -23,7 +25,7 @@ Refer to the [FAQs](#faqs) on how to update your models.
 
 This repository provides an end-to-end pipeline for generating guidepoint files (**GPFiles**) from CMR DICOMs, fitting biventricular models (**biv-me models**), and computing **functional cardiac metrics** such as volumes, strains, and wall thickness.
 
-Example data is available in the `example/` folder, including input DICOMs, GPFiles, and fitted models for testing and reference.
+Example data is available in the `demo/` folder, including input DICOMs, GPFiles, and fitted models for testing and reference.
 
 For a detailed description of the end-to-end image to mesh pipeline, including image preprocessing and biventricular model fitting, please refer to: <blockquote> Dillon, J.R., Mauger, C., Zhao, D., Deng, Y., Petersen, S.E., McCulloch, A.D., Young, A.A., & Nash, M.P. An open-source end-to-end pipeline for generating 3D+t biventricular meshes from cardiac magnetic resonance imaging. In: Functional Imaging and Modeling of the Heart (FIMH) 2025 (pp. 372-383). LNCS 15673.  [DOI:10.1007/978-3-031-94562-5_34](https://doi.org/10.1007/978-3-031-94562-5_34) </blockquote>
 
@@ -153,13 +155,14 @@ biv-me can be broadly divided into three different modules: **preprocessing** (D
 The first two modules (preprocessing and/or fitting) can be run from `src/bivme/main.py`, as detailed below.
 
 ```bash
-usage: main.py [-h] [-config CONFIG_FILE]
+usage: main.py [-h] [-config CONFIG_FILE] [-case CASE_NAME]
 ```
 
 | **Argument**          | **Description**                                                                               |
 | --------------------- | --------------------------------------------------------------------------------------------- |
 | `-h, --help`          | Displays the help message and exits.                                                          |
 | `-config CONFIG_FILE`     | Path to config file describing which modules to run and their associated parameters.                      |
+| `-case CASE_NAME`   | Name of individual case folder to run in configured directory (runs all if not provided).
 
 To run preprocessing and/or fitting, a **config file** must be created. The config file allows you to choose which modules to run and how you would like them to be run. An example of a config file can be found in `src/bivme/configs/config.toml`. If you wish, you can create a new config file for each time you want to make changes. Just make sure to update the path of the config file when you run the code!
 
@@ -167,24 +170,24 @@ To run preprocessing and/or fitting, a **config file** must be created. The conf
 We also provide an option to run the pipeline in an interactive step-by-step manner. This pipeline is the same as the one in `main.py`, but it is structured as a Jupyter notebook instead. It is a great place to start if you want to troubleshoot or to learn how the code works. Open the notebook at `src/bivme/main_interactive.ipynb` to get the interactive version of biv-me started.
 
 ### Example usage 
-Example DICOMs are provided in `example/dicoms` and example GPFiles are provided in `example/guidepoints/default`. You can verify that the repository is working by running biv-me on this example case (called *patient1*), using the following commands.
+Example DICOMs are provided in `demo/dicoms` and example GPFiles are provided in `demo/guidepoints/example`. You can verify that the repository is working by running biv-me on this demo case (called *patient1*), using the following commands.
 
 ```python
 cd src/bivme
 python main.py -config configs/config.toml
 ```
 
-By default, this will generate new GPFiles from the DICOMs for *patient1* in `example/dicoms` (**preprocessing**), fit biv-me models to the new GPFiles created in `example/guidepoints/test` (**fitting**), and save the fitted models to the `src/output` directory. You can review the default paths by opening the config file at `src/bivme/configs/config.toml`.
+By default, this will generate new GPFiles from the DICOMs for *patient1* in `demo/dicoms` (**preprocessing**), fit biv-me models to the new GPFiles created in `demo/guidepoints/test-run` (**fitting**), and save the fitted models to the `demo/fitted-models/test-run` directory. You can review the default paths by opening the config file at `src/bivme/configs/config.toml`.
 
-During preprocessing, you will be presented with a GUI that displays the automatically predicted views and prompts you to make corrections (if needed), save those corrections, and then continue (by closing the GUI). In this example case, the automatically predicted views are correct, but they may not always be. To minimise downstream errors, it is recommended to run biv-me with the *correct_mode* set to 'manual' in the config file, as it is for the example case. However, it is also possible to run fully automatically by setting *correct_mode* to 'automatic'.
+During preprocessing, you will be presented with a GUI that displays the automatically predicted views and prompts you to make corrections (if needed), save those corrections, and then continue (by closing the GUI). In this demo case, the automatically predicted views are correct, but they may not always be. To minimise downstream errors, it is recommended to run biv-me with the *correct_mode* set to 'manual' in the config file, as it is for the demo case. However, it is also possible to run fully automatically by setting *correct_mode* to 'automatic'.
 
-**If you did not configure the preprocessing in Steps 4 and 5 of the installation, you will not be able to run preprocessing**. If so, make sure to set *preprocessing=False* in the config file before running. If you turn off preprocessing, running `src/bivme/main.py` will carry out fitting only on the example GPFiles in `example/guidepoints/default`.
+**If you did not configure the preprocessing in Steps 4 and 5 of the installation, you will not be able to run preprocessing**. If so, make sure to set *preprocessing=False* in the config file before running. If you turn off preprocessing, running `src/bivme/main.py` will carry out fitting only on the already provided example GPFiles in `demo/guidepoints/example`.
 
 #### **Interactive example**
-You can also run the Jupyter notebook at `src/bivme/main_interactive.ipynb` to run the same example case, which offers a chance to get more familiar with how the pipeline works. 
+You can also run the Jupyter notebook at `src/bivme/main_interactive.ipynb` to run the same demo case, which offers a chance to get more familiar with how the pipeline works. 
 
 #### **Sample output**
-Example biv-me models for *patient1* have been already fitted, and can be found in `example/fitted-models/default`. These are provided in .txt, .vtk, and .obj formats. The first frame of the fitted models in .vtk format is visualised below using [Paraview](https://www.paraview.org/). Your fitted models should ideally look something like this.
+Example biv-me models for *patient1* have been already fitted, and can be found in `demo/fitted-models/example`. These are provided in .txt, .vtk, and .obj formats. The first frame of the fitted models in .vtk format is visualised below using [Paraview](https://www.paraview.org/). Your fitted models should ideally look something like this.
 
 ![Model4ch](images/Model1.png) 
 
@@ -209,7 +212,7 @@ When you run fitting, biv-me models will be created for each case for which ther
 
 If you already have GPFiles, then you do not need to run preprocessing. Simply set *preprocessing=False* and *fitting=True* in the config file, and set the *gp_directory* to the folder where you have GPFiles and SliceInfoFile.txt files, separated into one folder per case. 
 
-If you want to generate GPFiles yourself (i.e., not using biv-me preprocessing), but you don't know how to, the example GPFiles in `example/guidepoints/default` can serve as reference for the required format.
+If you want to generate GPFiles yourself (i.e., not using biv-me preprocessing), but you don't know how to, the example GPFiles in `demo/guidepoints/example` can serve as reference for the required format.
 
 Models will be generated as .txt files containing mesh vertex coordinates, .html plots for visualisation, and (optionally) .obj or .vtk files for LV endocardial, RV endocardial, and epicardial meshes.
 
@@ -219,7 +222,7 @@ If you specify in your config file to run both preprocessing and fitting, they w
 ## Visualisation of models (and images)
 Models can be visualised as .html plots which can be opened and interacted with inside your browser, or imported into a mesh visualisation software as .obj or .vtk objects to be viewed as a temporal sequence. The option to plot images alongside models in the .html plots is available to you in the config file (*include_images=True*), as is the option to export images as .vtk objects to display alongside fitted models (*export_images=True* - default is False) in a third-party software. Reviewing these settings to generate such visualisations can aid verification that the mesh reconstruction is faithful to the images.
 
-After performing fitting for the example case, .html plots can be found in `src/output/patient1/html`, and .vtk models and images can be found in the `src/output/patient1/vtk` and `src/output/patient1/images` folders respectively -- as long as the relevant config options have been set. 
+After performing fitting for the example case, .html plots can be found in `demo/fitted-models/test-run/patient1/html`, and .vtk models and images can be found in the `demo/fitted-models/test-run/patient1/vtk-meshes` and `demo/fitted-models/test-run/patient1/vtk-images` folders respectively -- as long as the relevant config options have been set. 
 
 Slice shifts (to correct for breath-hold misalignment) are automatically applied to the images to ensure that models and images are correctly registered. These slice shifts are derived from the fitting process, and are therefore unavailable if fitting is not performed. 
 
@@ -259,14 +262,14 @@ usage: compute_volume.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_PATH] [-b BIV_MODEL_F
 | `-p PRECISION`        | Sets the output precision (default: 2 decimal places).                                        |
 
 #### **Example Usage** 
-Example data is available in `example/fitted-models/default`. To compute the volumes using this data, run the following command:
+Example data is available in `demo/fitted-models/example`. To compute the volumes using this data, run the following command:
 
 ```python
 cd src/bivme/analysis
-python compute_volume.py -mdir ../../../example/fitted-models/default -p 1 -o example_volumes
+python compute_volume.py -mdir ../../../demo/fitted-models/example -p 1 -o example_volumes
 ```
 
-This will process the biv-me models in the `../../../example/fitted-models/default` directory, compute the volumes with a precision of 1 decimal place, and save the results in the `example_volumes` directory. The volumes will be saved in the `lvrv_volumes.csv` file.
+This will process the biv-me models in the `../../../demo/fitted-models/example` directory, compute the volumes with a precision of 1 decimal place, and save the results in the `example_volumes` directory. The volumes will be saved in the `lvrv_volumes.csv` file.
 
 **Sample Output** <br> 
 The output file will look like this:
@@ -306,14 +309,14 @@ usage: compute_global_longitudinal_strain.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_P
 
 
 #### **Example Usage**
-Example data is available in `example/fitted-models/default`. To compute the circumferential strains using this data, run the following command:
+Example data is available in `demo/fitted-models/example`. To compute the circumferential strains using this data, run the following command:
 
 ```python
 cd src/bivme/analysis
-python compute_global_circumferential_strain.py -mdir ../../../example/fitted-models/default -p 1 -o example_strains -ed 0
+python compute_global_circumferential_strain.py -mdir ../../../demo/fitted-models/example -p 1 -o example_strains -ed 0
 ```
 
-This will process the biv-me models in the `../../../example/fitted-models/default` directory, compute the global circumferential strain with a precision of 1 decimal place, and save the results in the `example_strains` directory. The GCS will be saved in the `global_circumferential_strain.csv` file. The first frame will be used as ED. 
+This will process the biv-me models in the `../../../demo/fitted-models/example` directory, compute the global circumferential strain with a precision of 1 decimal place, and save the results in the `example_strains` directory. The GCS will be saved in the `global_circumferential_strain.csv` file. The first frame will be used as ED. 
 
 **Sample Output** <br>
 The output file will look like this:
@@ -346,18 +349,18 @@ usage: compute_wall_thickness.py [-h] [-mdir MODEL_DIR] [-o OUTPUT_PATH] [-b BIV
 
 
 #### **Example Usage**
-Example data is available in `example/fitted-models/default`. To compute the wall thickness using this data, run the following command:
+Example data is available in `demo/fitted-models/example`. To compute the wall thickness using this data, run the following command:
 
 ```
-python compute_wall_thickness.py -mdir ../../../example/fitted-models/default -o example_thickness
+python compute_wall_thickness.py -mdir ../../../demo/fitted-models/example -o example_thickness
 ```
 
-This will process the biv-me models in the `../../../example/fitted-models/default` directory, compute the wall thickness at a resolution of 1mm, and save the results in the `example_thickness` directory. Wall thickness is sampled and saved at the location of each vertex and can be visualised in Paraview as vertex color or in 3D slicer.
+This will process the biv-me models in the `../../../demo/fitted-models/example` directory, compute the wall thickness at a resolution of 1mm, and save the results in the `example_thickness` directory. Wall thickness is sampled and saved at the location of each vertex and can be visualised in Paraview as vertex color or in 3D slicer.
 
 Adding the `-s` flag to the above command will also generate 4 extra nifti files per model: 2 3D masks with background=0, cavity=1, and wall=2 (`labeled_image_lv*.nii` and `labeled_image_lv*.nii`) and 2 3D mask containing thickness values at each voxel (`lv_thickness*.nii` and `rv_thickness*.nii`).
 
 ```
-python compute_wall_thickness.py -mdir ../../../example/fitted-models/default -o example_thickness -s
+python compute_wall_thickness.py -mdir ../../../demo/fitted-models/example -o example_thickness -s
 ```
 
 #### **Sample Output**
@@ -385,12 +388,6 @@ usage: detect_intersection.py [-h] [-config CONFIG_FILE]
 The config file should be the one used to fit the original models. Refitted models will be saved in config["output_fitting"]["output_directory"].
 
 ## FAQs
-### *How often will the deep learning models be updated?*
-
-We currently intend to release new segmentation models every few months when we have a sufficient number of new cases to add to the training data. There is no easy way to communicate when models have been updated, so keep an eye on the GitHub page for any notices. When the models are updated, a new release tag will be given to biv-me that matches the release tag in the [deep learning model repository](https://github.com/UOA-Heart-Mechanics-Research/biv-me-dl-models), so you can keep track of each update.
-
-We are always looking for more datasets to add to our models to make them more generalisable. If you are willing to contribute some data, get in contact with us at joshua.dillon@auckland.ac.nz or charlene.1.mauger@kcl.ac.uk.
-
 ### *How do I update my deep learning models?*
 
 If you have already installed biv-me and new deep learning models have been released since you installed it, you can simply pull the latest version of biv-me from the main branch...
@@ -411,7 +408,7 @@ This will update both biv-me and the deep learning models. If you would rather o
 git submodule update --init --remote
 ```
 
-### *I have updated the deep learning models but they perform worse on my data. How do I roll back to a previous version?*
+### *How do I access a specific version of the deep learning models?*
 
 If you want to access any previous version of the deep learning models, you can visit the [deep learning model repository](https://github.com/UOA-Heart-Mechanics-Research/biv-me-dl-models) to find the tag for that version (e.g. v1.0).
 
@@ -437,13 +434,9 @@ Another reason why some or all of your images cannot be read is that your DICOMs
 
 Another explanation is that your images are being filtered out. We use the series description tag of the DICOMs to infer which series are cines and which are not. This works 99% of the time, but it may not suit your dataset. You can review the string keys used to exclude non-cine series in `src/bivme/preprocessing/dicom/extract_cines.py` and change them as needed.
 
-### *This is fine, but can you generate LV only geometries?*
+### *Why does the code run slowly on my Mac?*
+The preprocessing pipeline uses 3D nnU-Net models to perform automatic segmentation. Unfortunately, [Apple silicon chips (M1-) with MPS do not currently support 3D convolutions](https://github.com/MIC-DKFZ/nnUNet/blob/master/documentation/installation_instructions.md), so segmentation is carried on CPU instead, and may take a long time to process. If possible, consider running preprocessing on a CUDA enabled device.   
 
-At the moment, we don't have a direct way of generating LV only (endocardium and epicardium) models. However, it is a priority feature for development and you can expect it to be released soon.
-
-### *How about the atria?*
-
-We are actively developing a four chamber model (left ventricle, right ventricle, left atrium, and right atrium) to be released in a future version of biv-me. 
 
 ## Contribution - Notation
 -----------------------------------------------
@@ -464,7 +457,9 @@ If you wish to contribute to this project, please follow the naming conventions 
 
 ## Acknowledgments
 ------------------------------------
-This work is based on contributions by **Laura Dal Toso**, **Anna Mira**, **Liandong Lee**, **Richard Burns**, **Debbie Zhao**, **Joshua Dillon**, and **Charlène Mauger**.
+This work is based on contributions by **Laura Del Toso**, **Esther Puyol-Anton**, **Sachin Govil**, **Brendan Crabb**, **Anna Mîra**, **Liandong Lee**, **Richard Burns**, **Devran Ugurlu**, **Ayah Elsayed**, **Grant Roberts**, **Debbie Zhao**, **Joshua Dillon**, and **Charlène Mauger**. 
+
+We gratefully acknowledge the study participants who contributed their data for development and validation of the biv-me pipeline.
 
 ## Contact
 For questions or issues, please open an issue on GitHub or contact [joshua.dillon@auckland.ac.nz](joshua.dillon@auckland.ac.nz) or [charlene.1.mauger@kcl.ac.uk](charlene.1.mauger@kcl.ac.uk) 

@@ -29,7 +29,10 @@ class ContourType(Enum):
     LAX_RV_FREEWALL = "LAX_RV_FREEWALL"
     SAX_RV_SEPTUM = "SAX_RV_SEPTUM"
     LAX_RV_SEPTUM = "LAX_RV_SEPTUM"
-    SAX_RV_OUTLET = "SAX_RV_OUTLET"
+    SAX_RV_OUTLET = "SAX_RV_OUTLET" # Deprecated in favour of OUTLET_RV_****, but kept for backward compatibility
+    OUTLET_RV_FREEWALL = "OUTLET_RV_FREEWALL"
+    OUTLET_RV_SEPTUM = "OUTLET_RV_SEPTUM"
+    OUTLET_RV_EPICARDIAL = "OUTLET_RV_EPICARDIAL"
 
     RV_INSERT = "RV_INSERT"
 
@@ -71,17 +74,19 @@ SURFACE_CONTOUR_MAP = {
         ContourType.SAX_LV_ENDOCARDIAL,
         ContourType.LAX_LV_ENDOCARDIAL,
     ],
-    Surface.RV_SEPTUM.value: [ContourType.LAX_RV_SEPTUM, ContourType.SAX_RV_SEPTUM],
+    Surface.RV_SEPTUM.value: [ContourType.LAX_RV_SEPTUM, ContourType.SAX_RV_SEPTUM, ContourType.OUTLET_RV_SEPTUM],
     Surface.RV_FREEWALL.value: [
         ContourType.SAX_RV_FREEWALL,
         ContourType.LAX_RV_FREEWALL,
         ContourType.SAX_RV_OUTLET,
+        ContourType.OUTLET_RV_FREEWALL,
     ],
     Surface.EPICARDIAL.value: [
         ContourType.SAX_LV_EPICARDIAL,
         ContourType.LAX_LV_EPICARDIAL,
         ContourType.SAX_RV_EPICARDIAL,
         ContourType.LAX_RV_EPICARDIAL,
+        ContourType.OUTLET_RV_EPICARDIAL,
     ],
     Surface.MITRAL_VALVE.value: [ContourType.MITRAL_VALVE, ContourType.MITRAL_PHANTOM],
     Surface.AORTA_VALVE.value: [ContourType.AORTA_VALVE, ContourType.AORTA_PHANTOM],

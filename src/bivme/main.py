@@ -49,6 +49,54 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument shifting must be derived_from_ed, average_all_frames or none. {config["breathhold_correction"]["shifting"]} given.')
         sys.exit(0)
 
+    if not config["breathhold_correction"]["ed_frame"] >= 0:
+        mylogger.error(f'argument ed_frame must be a non-negative integer. {config["breathhold_correction"]["ed_frame"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["sampling"] > 0:
+        mylogger.error(f'argument sampling must be a positive integer. {config["gp_processing"]["sampling"]} given.')
+        sys.exit(0)
+    
+    if not config["gp_processing"]["num_of_phantom_points_av"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_av must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_av"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_mv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_mv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_mv"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_tv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_tv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_tv"]} given.')
+        sys.exit(0)
+
+    if not config["gp_processing"]["num_of_phantom_points_pv"] >= 0:
+        mylogger.error(f'argument num_of_phantom_points_pv must be a non-negative integer. {config["gp_processing"]["num_of_phantom_points_pv"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["guide_points"] >= 0:
+        mylogger.error(f'argument guide_points weight must be a non-negative number. {config["fitting_weights"]["guide_points"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["convex_problem"] >= 0:
+        mylogger.error(f'argument convex_problem weight must be a non-negative number. {config["fitting_weights"]["convex_problem"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["transmural"] >= 0:
+        mylogger.error(f'argument transmural weight must be a non-negative number. {config["fitting_weights"]["transmural"]} given.')
+        sys.exit(0)
+
+    if not config["fitting_weights"]["lsq_trans_weight"] >= 0:
+        mylogger.error(f'argument lsq_trans_weight must be a non-negative number. {config["fitting_weights"]["lsq_trans_weight"]} given.')
+        sys.exit(0)
+
+    if not (config["refitting"]["perform_refits"] == True or config["refitting"]["perform_refits"] == False):
+        mylogger.error(f'argument perform_refits must be true or false. {config["refitting"]["perform_refits"]} given.')
+        sys.exit(0)
+
+    if not config["refitting"]["threshold_factor"] >= 1:
+        mylogger.error(f'argument threshold_factor must be a number greater than or equal to 1. {config["refitting"]["threshold_factor"]} given.')
+        sys.exit(0)
+
     if not (config["output_fitting"]["mesh_format"].endswith('.obj') or config["output_fitting"]["mesh_format"].endswith('.vtk') or config["output_fitting"]["mesh_format"] == 'none'):
         mylogger.error(f'argument mesh_format must be .obj, .vtk or none. {config["output_fitting"]["mesh_format"]} given.')
         sys.exit(0)
@@ -74,6 +122,29 @@ def validate_config_fitting(config, mylogger):
         mylogger.error(f'argument workers must be a positive integer. {config["multiprocessing"]["workers"]} given.')
         sys.exit(0)
 
+def validate_config_misc(config, mylogger):
+    # Validate logging parameters
+    if not (config["logging"]["show_detailed_logging"] == True or config["logging"]["show_detailed_logging"] == False):
+        mylogger.error(f'Invalid logging option: {config["logging"]["show_detailed_logging"]}. Must be True or False.')
+        sys.exit(0)
+    if not (config["logging"]["generate_log_file"] == True or config["logging"]["generate_log_file"] == False):
+        mylogger.error(f'Invalid logging option: {config["logging"]["generate_log_file"]}. Must be True or False.')
+        sys.exit(0)
+
+    # Validate plotting parameters
+    if not (config["plotting"]["generate_plots_preprocessing"] == True or config["plotting"]["generate_plots_preprocessing"] == False):
+        mylogger.error(f'Invalid plotting option: {config["plotting"]["generate_plots_preprocessing"]}. Must be True or False.')
+        sys.exit(0)
+    if not (config["plotting"]["generate_plots_fitting"] == True or config["plotting"]["generate_plots_fitting"] == False):
+        mylogger.error(f'Invalid plotting option: {config["plotting"]["generate_plots_fitting"]}. Must be True or False.')
+        sys.exit(0)
+    if not (config["plotting"]["include_images"] == True or config["plotting"]["include_images"] == False):
+        mylogger.error(f'Invalid plotting option: {config["plotting"]["include_images"]}. Must be True or False.')
+        sys.exit(0)
+    if not (config["plotting"]["export_images"] == True or config["plotting"]["export_images"] == False):
+        mylogger.error(f'Invalid plotting option: {config["plotting"]["export_images"]}. Must be True or False.')
+        sys.exit(0)
+    
 
 def run_preprocessing(case, config, mylogger):
     try:
@@ -90,7 +161,7 @@ def run_preprocessing(case, config, mylogger):
             else:
                 image_path = None
 
-            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path)
+            generate_html(case, output, out_dir=plotting, gp_suffix='', si_suffix='', frames_to_fit=[], my_logger=mylogger, model_path=None, image_path=image_path, vtk_export_path=None, workers=config["multiprocessing"]["workers"])
 
             mylogger.info(f'Generated html plots (preprocessing) at {os.path.join(plotting,case,"html")}.')
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
@@ -146,7 +217,7 @@ def run_fitting(case, config, mylogger):
                 vtk_export_path = None
 
             generate_html(case, gp_dir=gp_dir, out_dir=out_dir, gp_suffix=gp_suffix, si_suffix=si_suffix,
-                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path)
+                frames_to_fit=[], my_logger=logger, model_path = model_dir, image_path = image_path, vtk_export_path=vtk_export_path, workers=config["multiprocessing"]["workers"])
             
             mylogger.info(f"Generated html plots (fitting) for case {case} at {os.path.join(out_dir,case,f'html{gp_suffix}')}.")
             mylogger.info(f"Generating plots took: {time.time() - start_time:.2f} seconds")
@@ -164,6 +235,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run biv-me modules')
     parser.add_argument('-config', '--config_file', type=str,
                         help='Config file describing which modules to run and their associated parameters', default='configs/config.toml')
+    parser.add_argument('-case', '--case_name', type=str, 
+                        help='Case name to process (only this case will be run)', default=None)
+
     args = parser.parse_args()
 
     # Set up logging
@@ -204,6 +278,7 @@ if __name__ == "__main__":
             "gp_processing": {"sampling": int(), "num_of_phantom_points_av": int(), "num_of_phantom_points_mv": int(), "num_of_phantom_points_tv": int(), "num_of_phantom_points_pv": int()},
             "multiprocessing": {"workers": int()},
             "fitting_weights": {"guide_points": float(), "convex_problem": float(), "transmural": float(), "lsq_trans_weight": float()},
+            "refitting": {"perform_refits": bool(), "threshold_factor": float()},
             "output_fitting": {"output_directory": str(), "output_meshes": list(), "closed_mesh": bool(),   "export_control_mesh": bool(), "mesh_format": str(),  "overwrite": bool()},
         }:
             pass
@@ -216,33 +291,21 @@ if __name__ == "__main__":
 
     logger.info(f'Running modules: preprocessing={run_preprocessing_bool}, fitting={run_fitting_bool}')
 
-    # Validate logging parameters
-    if not (config["logging"]["show_detailed_logging"] == True or config["logging"]["show_detailed_logging"] == False):
-        logger.error(f'Invalid logging option: {config["logging"]["show_detailed_logging"]}. Must be True or False.')
-        sys.exit(0)
-    if not (config["logging"]["generate_log_file"] == True or config["logging"]["generate_log_file"] == False):
-        logger.error(f'Invalid logging option: {config["logging"]["generate_log_file"]}. Must be True or False.')
-        sys.exit(0)
-
-    # Validate plotting parameters
-    if not (config["plotting"]["generate_plots_preprocessing"] == True or config["plotting"]["generate_plots_preprocessing"] == False):
-        logger.error(f'Invalid plotting option: {config["plotting"]["generate_plots_preprocessing"]}. Must be True or False.')
-        sys.exit(0)
-    if not (config["plotting"]["generate_plots_fitting"] == True or config["plotting"]["generate_plots_fitting"] == False):
-        logger.error(f'Invalid plotting option: {config["plotting"]["generate_plots_fitting"]}. Must be True or False.')
-        sys.exit(0)
-    if not (config["plotting"]["include_images"] == True or config["plotting"]["include_images"] == False):
-        logger.error(f'Invalid plotting option: {config["plotting"]["include_images"]}. Must be True or False.')
-        sys.exit(0)
-    if not (config["plotting"]["export_images"] == True or config["plotting"]["export_images"] == False):
-        logger.error(f'Invalid plotting option: {config["plotting"]["export_images"]}. Must be True or False.')
-        sys.exit(0)
+    # Validate logging and plotting parameters
+    validate_config_misc(config, logger)
     
     # Determine which cases to process
     if run_preprocessing_bool: # then get case list from preprocessing source directory
         validate_config_preprocessing(config, logger)
         caselist = os.listdir(config["input_pp"]["source"])
         caselist = [case for case in caselist if os.path.isdir(os.path.join(config["input_pp"]["source"], case))]
+
+        if args.case_name is not None:
+            if args.case_name in caselist:
+                caselist = [args.case_name]
+            else:
+                logger.error(f'Case {args.case_name} not found in source directory {config["input_pp"]["source"]}.')
+                sys.exit(0)
 
         # Edit gp_directory to point to the output of the preprocessing
         gp_dir = os.path.join(config["output_pp"]["output_directory"], config["input_pp"]["batch_ID"])
@@ -257,6 +320,13 @@ if __name__ == "__main__":
         if not run_preprocessing_bool: # then get case list from fitting source directory
             caselist = os.listdir(config["input_fitting"]["gp_directory"])
             caselist = [case for case in caselist if os.path.isdir(os.path.join(config["input_fitting"]["gp_directory"], case))]
+
+        if args.case_name is not None:
+            if args.case_name in caselist:
+                caselist = [args.case_name]
+            else:
+                logger.error(f'Case {args.case_name} not found in gp_directory {config["input_fitting"]["gp_directory"]}.')
+                sys.exit(0)
 
         # save a copy of the config file to the output folder
         output_folder = Path(config["output_fitting"]["output_directory"])

@@ -19,6 +19,11 @@ fitting = true
 # * false   : Do not run this module
 # Default: true
 
+[multiprocessing]
+workers = 4
+# Number of workers to use for multi processing. This has been set conservatively low, and can be increased to speed up segmentation and fitting. If you run into CPU or memory issues, reduce this.
+# default: 4
+
 [logging]
 show_detailed_logging = true
 # Change the log visibility for preprocessing and fitting. Useful for debugging and oversight.
@@ -67,11 +72,11 @@ export_images = false
 # Below are the parameters used to configure preprocessing of DICOM files 
 # Skip these if you do not intend to run preprocessing
 [input_pp]
-source = "../../example/dicoms"
+source = "../../demo/dicoms"
 # Define the directory containing raw dicoms. Files must be grouped into one folder per case
 # Default: "../../example/dicoms"
 
-batch_ID = "test"
+batch_ID = "test-run"
 # Define the id of the batch you are processing. This will define the name of the folder that processed outputs will be written to
 # Default: "test"
 
@@ -79,11 +84,11 @@ analyst_id = "analyst1"
 # Define the id of the analyst performing the preprocessing. Useful e.g., if view predictions need to be corrected
 # Default: "analyst1"
 
-processing = "../../example/processing"
+processing = "../../demo/processing"
 # Define the directory where processing files (including view predictions, segmentations) will be written
 # Default: "../../example/processing"
 
-states = "../../example/states"
+states = "../../demo/states"
 # Define the directory where view predictions and log files will be written out to
 # Default: "../../example/states"
 
@@ -132,10 +137,10 @@ overwrite = false
 # Define to overwrite the processed folder and outputs of an already preprocessed case, if it exists
 # Default: false
 
-output_directory = "../../example/guidepoints"
+output_directory = "../../demo/guidepoints"
 # Define the directory where GPFiles will be created
 # If fitting and preprocessing are both enabled, this output_directory will also be the gp_directory used for fitting (see below)
-# Default: "../../example/guidepoints"
+# Default: "../../demo/guidepoints"
 
 #
 #
@@ -157,10 +162,10 @@ output_directory = "../../example/guidepoints"
 
 # Below are the parameters used to configure biv model fitting 
 [input_fitting]
-gp_directory = "../../example/guidepoints/default"
+gp_directory = "../../demo/guidepoints/example"
 # Define the directory containing guidepoint files
 # If fitting and preprocessing are both enabled, this gp_directory will also be the output_directory used in preprocessing (see above)
-# default: "../../example/guidepoints/default"
+# default: "../../demo/guidepoints/example"
 
 gp_suffix = ""
 # Define guidepoints to use if we do not want to fit all the models in the input folder
@@ -216,6 +221,18 @@ transmural = 0.01
 lsq_trans_weight = 0.001
 # Default: 0.001
 
+[refitting]
+perform_refits = true
+# Decide whether potentially non-convergent outlier frames with high residuals are refit with a different initial model scale. 
+# Default:  true
+
+threshold_factor = 1.2
+# Set the multiplicative threshold above the median residual to determine whether a frame should be refit. This given threshold factor is multiplied by the median residual across all frames for a given case to determine the absolute threshold. 
+# Frames with residuals above the absolute threshold will be considered as outliers and will be attempted to be refit.
+# The given example will ensure refitting is applied on frames where residuals are >20% higher than the median.
+# Set this to be higher if non-outlier frames are being unnecessarily refit, and lower if it outliers are not being caught. 
+# Default:  1.2 
+
 [output_fitting]
 export_control_mesh = false
 # Decide whether or not to save the coarse mesh. If true, the coarse mesh will be generated (format: mesh_format)
@@ -242,11 +259,6 @@ overwrite = false
 # Define whether to overwrite the output mesh if it exists
 # Default: false
 
-output_directory = "../output/"
+output_directory = "../../demo/fitted-models/test-run"
 # Define where to save the fitted models and files
-# default: "../output/"
-
-[multiprocessing]
-workers = 1
-# number of workers to use for multi processing
-# default: 1
+# default: "../../demo/fitted-models/test-run"

@@ -382,15 +382,16 @@ class SliceViewer:
                 #             'SAX_RV_EPICARDIAL',
                 #             'PULMONARY_VALVE']
 
-                labels = ['LAX_RV_FREEWALL',
-                            'LAX_RV_SEPTUM',
-                            'LAX_RV_EPICARDIAL',
-                            'PULMONARY_VALVE']
-
-                # labels = ['OUTLET_RV_FREEWALL',
-                #             'OUTLET_RV_SEPTUM',
-                #             'OUTLET_RV_EPICARDIAL',
+                # labels = ['LAX_RV_FREEWALL',
+                #             'LAX_RV_SEPTUM',
+                #             'LAX_RV_EPICARDIAL',
                 #             'PULMONARY_VALVE']
+
+                # OUTLET type contours are oblique to SAX and LAX contours, so we use a different label to distinguish them 
+                labels = ['OUTLET_RV_FREEWALL',
+                            'OUTLET_RV_SEPTUM',
+                            'OUTLET_RV_EPICARDIAL',
+                            'PULMONARY_VALVE']
 
                 for i,points in enumerate(point_lists):
                     if points is None:

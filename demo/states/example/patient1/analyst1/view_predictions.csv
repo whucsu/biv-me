@@ -1,0 +1,12 @@
+Series Number,Series Description,Slice Location,Predicted View,Vote Share,Confidence,Frames Per Slice
+7001,cine_trufi_retro,3.8507,SAX-atria,1.0,0.985977,25
+8001,cine_trufi_retro,-13.8493,SAX,1.0,0.9939297,25
+9001,cine_trufi_retro,-31.5493,SAX,1.0,0.9996088,25
+10001,cine_trufi_retro,-49.2493,SAX,1.0,0.99926835,25
+11001,cine_trufi_retro,-66.9493,SAX,1.0,0.99605715,25
+12001,cine_trufi_retro,-84.6493,SAX,1.0,0.9894344,25
+14001,cine_trufi_retro 4CH,41.5529,4ch,1.0,0.9792004,25
+16001,cine_trufi_retro 4CH,-21.5579,3ch,1.0,0.9071957,25
+17001,cine_trufi_retro 2CH,17.6426,2ch,1.0,0.9930603,25
+19001,cine_trufi_retro 2CH,-35.034,2ch-RV,1.0,0.9987162,25
+22001,cine_trufi_retro RVOT,-12.1561,RVOT,1.0,0.9916985,25

@@ -158,7 +158,7 @@ class VSGUI:
 
         # Set base image size
         base_image_size = 150  # Base size for images in pixels (width=height)
-        if len(self.img_dict.keys()) > 24:
+        if len(self.img_dict.keys()) > 24 and len(self.img_dict.keys()) <= 48:
             base_image_size = 100
         elif len(self.img_dict.keys()) > 48:
             base_image_size = 75

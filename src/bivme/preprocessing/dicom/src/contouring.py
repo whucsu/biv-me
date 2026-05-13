@@ -443,7 +443,7 @@ def contour_SAX(segmentation):
                 RV_fw_pts = np.vstack([RV_fw_pts, RV_septal_pts[np.unique(pairs[:,0])]])
             RV_septal_pts = np.array([pnt.tolist() for i, pnt in enumerate(RV_septal_pts) if i not in np.unique(pairs[:,0])], 
                                 dtype=np.int64)
-
+            
     # Get intersection points between LV epi and LV myo to keep only myocardial points
     if len(LV_epi_pts)>0 and len(LV_myo_pts)>0:
         pairs = get_intersections(LV_epi_pts, LV_myo_pts, distance_cutoff=1.5)
@@ -456,17 +456,9 @@ def contour_SAX(segmentation):
         pairs = get_intersections(RV_epi_pts, LV_epi_pts, distance_cutoff=1.5)
 
         if len(pairs) > 0:
-            RV_epi_pts = np.array([pnt.tolist() for i, pnt in enumerate(RV_epi_pts) if i not in np.unique(pairs[:,0])], 
+            RV_epi_pts = np.array([pnt.tolist() for i, pnt in enumerate(RV_epi_pts) if i not in np.unique(pairs[:,0])],
                                 dtype=np.int64)
-            
-    # # Compare centroids of LV endo and LV myo, if they are too far apart, segmentation is likely broken, so exclude both sets of points
-    # if len(LV_endo_pts) > 0 and len(LV_myo_pts) > 0:
-    #     lv_endo_centroid = np.mean(LV_endo_pts, axis=0)
-    #     lv_myo_centroid = np.mean(LV_myo_pts, axis=0)
 
-    #     if np.linalg.norm(lv_endo_centroid - lv_myo_centroid) > 10:
-    #         LV_endo_pts = []
-    #         LV_epi_pts = []
             
     # If there are no lv endo points, remove the lv epi points
     if len(LV_endo_pts) == 0:
@@ -788,7 +780,7 @@ def contour_3ch(segmentation):
             
     # Get intersection points between RV epi and RV myo to keep only free wall points
     if len(RV_epi_pts)>0 and len(RV_myo_pts)>0:
-        pairs = get_intersections(RV_epi_pts, RV_myo_pts, distance_cutoff=1)
+        pairs = get_intersections(RV_epi_pts, RV_myo_pts, distance_cutoff=1.5)
 
         if len(pairs) > 0:
             RV_epi_pts = RV_epi_pts[np.unique(pairs[:,0])]
@@ -811,7 +803,7 @@ def contour_3ch(segmentation):
         pairs = get_intersections(RV_epi_pts, LV_epi_pts, distance_cutoff=1.5)
 
         if len(pairs) > 0:
-            RV_epi_pts = np.array([pnt.tolist() for i, pnt in enumerate(RV_epi_pts) if i not in np.unique(pairs[:,0])], 
+            RV_epi_pts = np.array([pnt.tolist() for i, pnt in enumerate(RV_epi_pts) if i not in np.unique(pairs[:,0])],
                                 dtype=np.int64)
             
     return [LV_endo_pts, LV_epi_pts, RV_septal_pts, RV_fw_pts, la_pts, aorta_pts, RV_epi_pts]
